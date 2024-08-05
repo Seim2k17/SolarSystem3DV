@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -99,6 +100,7 @@ private:
   void initVulkan() {
     createInstance();
     setupDebugMessenger();
+    pickPhysicalDevice();
   }
 
   void mainLoop() {
@@ -210,6 +212,72 @@ private:
     return VK_FALSE; /// if true the call is aborted with
                      /// VK_ERROR_VALIDATION_FAILED_EXT
   }
+
+  int rateDeviceSuitability(VkPhysicalDevice device) {
+    int score = 0;
+
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(device, &deviceProperties);
+    // Discrete GPUs have a significant performance advantage
+    if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+      score += 1000;
+    }
+    // Maximum possible size of textures affects graphics quality
+    score += deviceProperties.limits.maxImageDimension2D;
+
+    VkPhysicalDeviceFeatures deviceFeatures;
+    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+    // Application can't function without geometry shaders
+    if (!deviceFeatures.geometryShader) {
+      return 0;
+    }
+
+    return score;
+  }
+
+  void pickPhysicalDevice() {
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+
+    if (deviceCount == 0) {
+      throw std::runtime_error("failed to find GPUs with Vulkan support!");
+    }
+
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+    // rate the physical device and pick the one with the highest score (which
+    // def. meet the requirement)
+    std::multimap<int, VkPhysicalDevice> candidates;
+
+    for (const auto &device : devices) {
+      int score = rateDeviceSuitability(device);
+      candidates.insert(std::make_pair(score, device));
+    }
+    if (candidates.begin()->first > 0) {
+      physicalDevice = candidates.rbegin()->second;
+    } else {
+      throw std::runtime_error("failed to find a suitable GPU!");
+    }
+  }
+
+  // check GPU for vulkan-features we need for our app, later on we add more !
+  bool isDeviceSuitable(VkPhysicalDevice device) {
+    /* this could be a device selection process
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(device, &deviceProperties);
+    std::cout << "DeviceName: " << deviceProperties.deviceName << std::endl;
+    VkPhysicalDeviceFeatures deviceFeatures;
+    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+    // e.g. app only usable for dedicated graphics cards that support geometry
+    // shader
+    return deviceProperties.deviceType ==
+               VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+           deviceFeatures.geometryShader;
+    */
+    // we accept any GPU
+    return true;
+  }
+
   void populateDebugMessengerCreateInfo(
       VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
 
@@ -244,6 +312,7 @@ private:
     }
   }
 
+  VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debugMesseger;
   GLFWwindow *window;
   VkInstance instance;
