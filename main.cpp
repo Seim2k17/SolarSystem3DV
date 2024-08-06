@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -18,6 +19,7 @@ const std::vector<const char *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"};
 
 // clang-format off
+// check if its a debug-build or not
 #ifdef NDEBUG
   const bool enableValidationLayers = false;
 #else
@@ -49,6 +51,13 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance,
     func(instance, debugMessenger, pAllocator);
   }
 }
+
+struct QueueFamilyIndices {
+  // graphicsFamily could have a value or not
+  std::optional<uint32_t> graphicsFamily;
+
+  bool isComplete() { return graphicsFamily.has_value(); }
+};
 
 class TriangleApp {
 public:
@@ -213,6 +222,44 @@ private:
                      /// VK_ERROR_VALIDATION_FAILED_EXT
   }
 
+  // before drawing, even before almost every operation in Vulkan commands need
+  // to be submitted to a queue, there are differet types of queues that are
+  // originated in different queue families, each family only allows processing
+  // of certain commands we need to check which queue families are supported by
+  // the device for now we only looking for a queu that supports graphic
+  // commands
+  QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
+    // logic to find graphics queue family
+    QueueFamilyIndices indices;
+    // 1. get the queueFamilyCount
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount,
+                                             nullptr);
+
+    // 2. then get the properties in the exactly length
+    // VkQueueFamilyProperties - struct contains details about the queue family,
+    // incl. type of operations that are supported
+
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount,
+                                             queueFamilies.data());
+
+    // for now we need a queue that supports >VK_QUEUE_GRAPHICS_BIT
+
+    int i = 0;
+    for (const auto &queueFamily : queueFamilies) {
+      if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        indices.graphicsFamily = 1;
+      }
+      // early return we found the needed capability
+      if (indices.isComplete()) {
+        break;
+      }
+      ++i;
+    }
+    return indices;
+  }
+
   int rateDeviceSuitability(VkPhysicalDevice device) {
     int score = 0;
 
@@ -274,8 +321,9 @@ private:
                VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
            deviceFeatures.geometryShader;
     */
-    // we accept any GPU
-    return true;
+    // ensure that the device can process the commands we want to use
+    QueueFamilyIndices indices = findQueueFamilies(device);
+    return indices.isComplete();
   }
 
   void populateDebugMessengerCreateInfo(
