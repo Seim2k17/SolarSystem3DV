@@ -110,6 +110,7 @@ private:
     createInstance();
     setupDebugMessenger();
     pickPhysicalDevice();
+    createLogicalDevice();
   }
 
   void mainLoop() {
@@ -126,6 +127,7 @@ private:
     }
 
     // destroy the instance right before the window
+    vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
     glfwDestroyWindow(window);
     std::cout << "Cleanup!" << std::endl;
@@ -158,7 +160,7 @@ private:
     const char **glfwExtension;
     glfwExtension = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-    auto extensions = getRequiredExtesions();
+    auto extensions = getRequiredExtensions();
     createInfo.enabledExtensionCount = static_cast<uint32_t>(
         extensions.size()); // standard: glfwExtensionCount;
     createInfo.ppEnabledExtensionNames =
@@ -189,7 +191,7 @@ private:
 
   // for setting up a callback to handle messages and details for the validation
   // layer
-  std::vector<const char *> getRequiredExtesions() {
+  std::vector<const char *> getRequiredExtensions() {
     uint32_t glfwExtensionCount = 0;
     const char **glfwExtensions;
     glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
@@ -326,6 +328,53 @@ private:
     return indices.isComplete();
   }
 
+  void createLogicalDevice() {
+    // 1. specifying details in structs
+    QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+    VkDeviceQueueCreateInfo queueCreateInfo{};
+    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+    queueCreateInfo.queueCount = 1;
+
+    // influence scheduling of command buffer execution from 0.0 .. 1.0
+    float queuePriority = 1.0f;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    VkPhysicalDeviceFeatures deviceFeatures{};
+    vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    createInfo.queueCreateInfoCount = 1;
+    createInfo.pEnabledFeatures = &deviceFeatures;
+
+    /* no device specific extension needed for now */
+    /*
+    createInfo.enabledExtensionCount;
+    createInfo.ppEnabledExtensionNames;
+    createInfo.flags;
+    */
+
+    if (enableValidationLayers) {
+      createInfo.enabledLayerCount =
+          static_cast<uint32_t>(validationLayers.size());
+      createInfo.ppEnabledLayerNames = validationLayers.data();
+    } else {
+      createInfo.enabledLayerCount = 0;
+    }
+
+    if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create logical device!");
+    } else {
+      std::cout << "Logical device: " << device << " created." << std::endl;
+    }
+    // as we only create a single queue from this family, we use 0 as a index
+    vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+  }
+
   void populateDebugMessengerCreateInfo(
       VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
 
@@ -361,6 +410,13 @@ private:
   }
 
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+  // logical device to interface with
+  // could setup more logical device from one physical device for different
+  // requirements
+  VkDevice device;
+  // queues are automatically created with the logical device but we need a
+  // handle to interface with, the are implicitly cleaned up with the device
+  VkQueue graphicsQueue;
   VkDebugUtilsMessengerEXT debugMesseger;
   GLFWwindow *window;
   VkInstance instance;
