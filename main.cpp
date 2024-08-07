@@ -1,6 +1,15 @@
+#include <GLFW/glfw3native.h>
 #include <bits/stdint-uintn.h>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
+
+#ifdef WIN32
+#include <vulkan/vulkan_win32.h>
+#define VK_USE_PLATFORM_WIN32_KHR /// Platform windows support ...
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -9,6 +18,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <vector>
 
@@ -55,8 +65,11 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance,
 struct QueueFamilyIndices {
   // graphicsFamily could have a value or not
   std::optional<uint32_t> graphicsFamily;
+  std::optional<uint32_t> presentFamily;
 
-  bool isComplete() { return graphicsFamily.has_value(); }
+  bool isComplete() {
+    return graphicsFamily.has_value() && presentFamily.has_value();
+  }
 };
 
 class TriangleApp {
@@ -109,6 +122,7 @@ private:
   void initVulkan() {
     createInstance();
     setupDebugMessenger();
+    setupWindowSurface();
     pickPhysicalDevice();
     createLogicalDevice();
   }
@@ -128,6 +142,9 @@ private:
 
     // destroy the instance right before the window
     vkDestroyDevice(device, nullptr);
+    vkDestroySurfaceKHR(instance, surface,
+                        nullptr); /// surface need to be destroyed before the
+                                  /// instance destruction !
     vkDestroyInstance(instance, nullptr);
     glfwDestroyWindow(window);
     std::cout << "Cleanup!" << std::endl;
@@ -224,6 +241,31 @@ private:
                      /// VK_ERROR_VALIDATION_FAILED_EXT
   }
 
+  // window need to be setup right after the instance creation, it can influence
+  // the physical device selection window surfaces are optional component of
+  // vulkan (e.g. one need off-screen rendering)
+  void setupWindowSurface() {
+#ifdef WIN32
+    // Windows specific code:
+    VkWin32SurfaceCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+    createInfo.hwnd = glfwGetWin32Window(window);
+    createInfo.hinstance = GetModuleHandle(nullptr);
+
+    if (vkCreateWin32SurfaceKHR(instance, &createInfo, nullptr, &surface) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create window surface!");
+    }
+#endif
+
+#ifdef __linux__
+    if (glfwCreateWindowSurface(instance, window, nullptr, &surface) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create window!");
+    }
+#endif
+  }
+
   // before drawing, even before almost every operation in Vulkan commands need
   // to be submitted to a queue, there are differet types of queues that are
   // originated in different queue families, each family only allows processing
@@ -250,6 +292,16 @@ private:
 
     int i = 0;
     for (const auto &queueFamily : queueFamilies) {
+      VkBool32 presentSupport = false;
+      vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+
+      // bc it does not mean that every every device support the window system
+      // integration so we need to find a queue-family that support presenting
+      // to the surface, it's very likely that these end up being the same queue
+      // family after all
+      if (presentSupport) {
+        indices.presentFamily = i;
+      }
       if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
         indices.graphicsFamily = 1;
       }
@@ -332,23 +384,31 @@ private:
     // 1. specifying details in structs
     QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 
-    VkDeviceQueueCreateInfo queueCreateInfo{};
-    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
-    queueCreateInfo.queueCount = 1;
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(),
+                                              indices.presentFamily.value()};
 
     // influence scheduling of command buffer execution from 0.0 .. 1.0
     float queuePriority = 1.0f;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    for (uint32_t queueFamily : uniqueQueueFamilies) {
+      VkDeviceQueueCreateInfo queueCreateInfo{};
+      queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+      queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+      queueCreateInfo.queueCount = 1;
+      queueCreateInfo.pQueuePriorities = &queuePriority;
+      queueCreateInfos.push_back(queueCreateInfo);
+    }
 
     VkPhysicalDeviceFeatures deviceFeatures{};
-    vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+    // vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.pQueueCreateInfos = &queueCreateInfo;
-    createInfo.queueCreateInfoCount = 1;
+    createInfo.pQueueCreateInfos = queueCreateInfos.data();
+    createInfo.queueCreateInfoCount =
+        static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pEnabledFeatures = &deviceFeatures;
+    createInfo.enabledExtensionCount = 0;
 
     /* no device specific extension needed for now */
     /*
@@ -356,7 +416,6 @@ private:
     createInfo.ppEnabledExtensionNames;
     createInfo.flags;
     */
-
     if (enableValidationLayers) {
       createInfo.enabledLayerCount =
           static_cast<uint32_t>(validationLayers.size());
@@ -372,6 +431,8 @@ private:
       std::cout << "Logical device: " << device << " created." << std::endl;
     }
     // as we only create a single queue from this family, we use 0 as a index
+    // retrieve the  queue handle
+    vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
     vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
   }
 
@@ -417,6 +478,8 @@ private:
   // queues are automatically created with the logical device but we need a
   // handle to interface with, the are implicitly cleaned up with the device
   VkQueue graphicsQueue;
+  VkSurfaceKHR surface;
+  VkQueue presentQueue;
   VkDebugUtilsMessengerEXT debugMesseger;
   GLFWwindow *window;
   VkInstance instance;
