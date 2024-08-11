@@ -1,5 +1,6 @@
 #include <GLFW/glfw3native.h>
 #include <bits/stdint-uintn.h>
+#include <cstddef>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
 
@@ -174,6 +175,7 @@ private:
     pickPhysicalDevice();
     createLogicalDevice();
     createSwapChain();
+    createImageViews();
   }
 
   void mainLoop() {
@@ -187,6 +189,10 @@ private:
     // we can use a sepatare debug utils messenger
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(instance, debugMesseger, nullptr);
+    }
+
+    for (auto imageView : swapChainImageViews) {
+      vkDestroyImageView(device, imageView, nullptr);
     }
 
     vkDestroySwapchainKHR(device, swapChain, nullptr);
@@ -707,6 +713,44 @@ private:
     swapChainExtent = extent;
   }
 
+  /*
+  ** An imagevieview is sufficient to start using an image as a texture, but to
+  *  be rendered a frambuffer is needed (see graphic-pipelines-creation)
+  */
+  void createImageViews() {
+    swapChainImageViews.resize(swapChainImages.size());
+
+    for (size_t i = 0; i < swapChainImages.size(); i++) {
+      VkImageViewCreateInfo createInfo{};
+      createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      createInfo.image = swapChainImages[i];
+      createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      createInfo.format = swapChainImageFormat;
+      // allow to swizzle the  color  channels around , e.g. map all channels to
+      // the red channel for a monochrome texture: here we stick to the default
+      createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+      createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+      createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+      createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+      // describes the purpose of the image and which part of the image should
+      // be accessed here our images are color targets without mipmapping levels
+      // or multiple layers
+      createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      createInfo.subresourceRange.baseMipLevel = 0;
+      createInfo.subresourceRange.levelCount = 1;
+      createInfo.subresourceRange.baseArrayLayer = 0;
+      createInfo.subresourceRange.layerCount =
+          1; /// working with a stereographic 3D app, a swap chain with multiple
+             /// layers is needed (VR?)
+
+      if (vkCreateImageView(device, &createInfo, nullptr,
+                            &swapChainImageViews[i]) !=
+          VK_SUCCESS) { /// manual creation process demands a manual destroy !
+        throw std::runtime_error("failed to create image views!");
+      }
+    }
+  }
+
   void populateDebugMessengerCreateInfo(
       VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
 
@@ -755,6 +799,10 @@ private:
   std::vector<VkImage> swapChainImages;
   VkFormat swapChainImageFormat;
   VkExtent2D swapChainExtent;
+  // to use any VkImage, we need a view into a image, it described how to access
+  // the image and which part of the image, should be treated as 2D depth
+  // texture wothout any mimapping levels
+  std::vector<VkImageView> swapChainImageViews;
 
   VkDebugUtilsMessengerEXT debugMesseger;
   GLFWwindow *window;
