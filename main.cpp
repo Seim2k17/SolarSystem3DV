@@ -1,6 +1,8 @@
 #include <GLFW/glfw3native.h>
 #include <bits/stdint-uintn.h>
 #include <cstddef>
+#include <fstream>
+#include <ios>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
 
@@ -66,6 +68,32 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance,
   if (func != nullptr) {
     func(instance, debugMessenger, pAllocator);
   }
+}
+
+/*
+** Helper function to open the shader files
+*/
+static std::vector<char> readFile(const std::string &filename) {
+  // start at the end of the file (ate) / binary
+  std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+  if (not file.is_open()) {
+    throw std::runtime_error("failed to open file!");
+  }
+
+  // bc of reading at the end we can determine the size of the file and allocate
+  // a buffer
+  size_t fileSize = (size_t)file.tellg();
+  std::vector<char> buffer(fileSize);
+  std::cout << "read bufferSize: " << fileSize << std::endl;
+
+  // the seek back and read data at once
+  file.seekg(0);
+  file.read(buffer.data(), fileSize);
+
+  file.close();
+
+  return buffer;
 }
 
 struct QueueFamilyIndices {
@@ -176,6 +204,7 @@ private:
     createLogicalDevice();
     createSwapChain();
     createImageViews();
+    createGraphicsPipeline();
   }
 
   void mainLoop() {
@@ -751,6 +780,64 @@ private:
     }
   }
 
+  // clang-format off
+  /*
+  ** The graphics pipeline is the sequence of operations that take the vertices
+  *  & textures of the meshes all the way to render the pixels in the render
+  *  targets.
+  ** Vertex/index buffer -> Input Assembler -> Vertex shader ->Tessellation -> Geometry shader -> Rasterization -> Fragment shader -> Color blending -> Frame buffer
+  */
+  // clang-format on
+  void createGraphicsPipeline() {
+    auto vertShaderCode = readFile("shaders/vert.spv");
+    auto fragShaderCode = readFile("shaders/frag.spv");
+
+    // compilation & linking from SPIR-V bytecode to machinecode will not happen
+    // until the graphic pipeline is created so we need local variables ...
+    VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+    VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    // entrypoint - function
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    vertShaderStageInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    vertShaderStageInfo.module = fragShaderModule;
+    // entrypoint - function
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {
+        vertShaderStageInfo,
+        fragShaderStageInfo}; //.. and need to cleanup them here ...
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+  }
+
+  /*
+  ** Helper function to wrap a shaderBuffer to a VkShaderModule object
+  */
+  VkShaderModule createShaderModule(const std::vector<char> &code) {
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = code.size();
+    createInfo.pCode = reinterpret_cast<const uint32_t *>(code.data());
+
+    VkShaderModule shaderModule;
+    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create shader module!");
+    }
+
+    return shaderModule;
+  }
   void populateDebugMessengerCreateInfo(
       VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
 
