@@ -209,6 +209,7 @@ private:
     createLogicalDevice();
     createSwapChain();
     createImageViews();
+    createRenderPass();
     createGraphicsPipeline();
   }
 
@@ -225,7 +226,7 @@ private:
       DestroyDebugUtilsMessengerEXT(instance, debugMesseger, nullptr);
     }
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-
+    vkDestroyRenderPass(device, renderPass, nullptr);
     for (auto imageView : swapChainImageViews) {
       vkDestroyImageView(device, imageView, nullptr);
     }
@@ -786,6 +787,64 @@ private:
     }
   }
 
+  /*
+   * Before creating the pipeline we need to tell Vulkan about the framebuffer
+   * attachements that will be used while rendering.
+   */
+  void createRenderPass() {
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = swapChainImageFormat; /// should match the format
+                                                   /// of the swap chain images
+    colorAttachment.samples =
+        VK_SAMPLE_COUNT_1_BIT; /// no multisampling, 1 sample
+    colorAttachment.loadOp =
+        VK_ATTACHMENT_LOAD_OP_CLEAR; /// clear framebuffer to black before
+                                     /// drawing a new frame
+    colorAttachment.storeOp =
+        VK_ATTACHMENT_STORE_OP_STORE; /// rendered contents will be stored in
+                                      /// memory and can be read later
+    colorAttachment.stencilLoadOp =
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE; /// we wont do anything with stencil
+                                         /// buffer
+    colorAttachment.stencilStoreOp =
+        VK_ATTACHMENT_STORE_OP_DONT_CARE; /// so results on load and store is
+                                          /// irrelevant
+    colorAttachment.initialLayout =
+        VK_IMAGE_LAYOUT_UNDEFINED; /// we dont care what previous layout the
+                                   /// image was in
+    colorAttachment.finalLayout =
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; /// we want the img to be ready for
+                                         /// presentation uisng the swap chain
+                                         /// after rendering
+
+    // every subpass references one or more attachments
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment =
+        0; /// we ony have 1 VkAttachmentDescription, so index is 0
+    colorAttachmentRef.layout =
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; /// attachment is intended as
+                                                  /// a color buffer with "best
+                                                  /// performance"
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.colorAttachmentCount = 1;
+
+    // create Renderpass itself
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+
+    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create render pass!");
+    }
+  }
+
   // clang-format off
   /*
   ** The graphics pipeline is the sequence of operations that take the vertices
@@ -1062,7 +1121,7 @@ private:
   // texture wothout any mimapping levels
   std::vector<VkImageView> swapChainImageViews;
   VkPipelineLayout pipelineLayout;
-
+  VkRenderPass renderPass;
   VkDebugUtilsMessengerEXT debugMesseger;
   GLFWwindow *window;
   VkInstance instance;
