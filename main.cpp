@@ -211,6 +211,7 @@ private:
     createImageViews();
     createRenderPass();
     createGraphicsPipeline();
+    createFramebuffers();
   }
 
   void mainLoop() {
@@ -225,7 +226,11 @@ private:
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(instance, debugMesseger, nullptr);
     }
+    vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    for (auto framebuffer : swapChainFramebuffers) {
+      vkDestroyFramebuffer(device, framebuffer, nullptr);
+    }
     vkDestroyRenderPass(device, renderPass, nullptr);
     for (auto imageView : swapChainImageViews) {
       vkDestroyImageView(device, imageView, nullptr);
@@ -871,15 +876,15 @@ private:
     vertShaderStageInfo.pName = "main";
 
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-    vertShaderStageInfo.sType =
+    fragShaderStageInfo.sType =
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    vertShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
     // entrypoint - function
-    vertShaderStageInfo.pName = "main";
+    fragShaderStageInfo.pName = "main";
     // an array which holds these shaderStructs
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo,
-                                                      fragShaderStageInfo};
+    VkPipelineShaderStageCreateInfo shaderStages[] = {fragShaderStageInfo,
+                                                      vertShaderStageInfo};
 
     // this will cause the configuration of these values to be ignored & you
     // need to specify the data at drawing time this results in a more flexible
@@ -1046,9 +1051,78 @@ private:
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
+    // referencing the array of VkPipelineShaderStageCreateInfo-structs
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    // referencing the fixed-function stage
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = nullptr; /// optional
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    // pipelineLayout
+    pipelineInfo.layout = pipelineLayout;
+    // renderpass reference
+    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.subpass = 0;
+    // Vulkan allows you to create a new graphics pipeline from an existing one
+    // (less expensove) at the moment we only have a single pipeline, so we
+    // specify a nullHandle and invalid index only used if
+    // VK_PIPELINE_CREATE_DERIVATIVE_BIT is also specified
+    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+    pipelineInfo.basePipelineIndex = -1;              // Optional
+
+    // final step !
+    // VkPipelineCache can be used to store & reuse data relevant to pipeline
+    // creation across multiple calls to vkCreateGraphicsPipeline
+    //
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                  nullptr, &graphicsPipeline) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create graphics pipeline!");
+    }
+
     //.. and need to cleanup them here ...
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
+  }
+
+  /**
+   * A Framebuffer object references all VkImageView objetcs that represent
+   * attachments
+   * We only have atm a colorAttachment
+   * the image which is used depends on which image the swap chain returns when
+   * we retrieve one for representation
+   * We have to create a framebuffer for all the images in the swap chain and
+   * use the one that corresponds to the retrieved image at drawing time.
+   */
+  void createFramebuffers() {
+    // size it to the hold imageViews
+    swapChainFramebuffers.resize(swapChainImageViews.size());
+
+    for (size_t i = 0; i < swapChainImageViews.size(); ++i) {
+      VkImageView attachments[] = {swapChainImageViews[i]};
+      VkFramebufferCreateInfo framebufferInfo{};
+      framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+      // specifiy which renderpass the framebuffer needs to be compatible with
+      // they need to use the samenumber and types of attachments
+      framebufferInfo.renderPass = renderPass;
+      // specify the VkImageView objects
+      framebufferInfo.attachmentCount = 1;
+      framebufferInfo.pAttachments = attachments;
+      framebufferInfo.width = swapChainExtent.width;
+      framebufferInfo.height = swapChainExtent.height;
+      framebufferInfo.layers = 1;
+
+      if (vkCreateFramebuffer(device, &framebufferInfo, nullptr,
+                              &swapChainFramebuffers[i]) != VK_SUCCESS) {
+        throw std::runtime_error("failed tp create framebuffer");
+      }
+    }
   }
 
   /*
@@ -1068,6 +1142,7 @@ private:
 
     return shaderModule;
   }
+
   void populateDebugMessengerCreateInfo(
       VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
 
@@ -1122,6 +1197,9 @@ private:
   std::vector<VkImageView> swapChainImageViews;
   VkPipelineLayout pipelineLayout;
   VkRenderPass renderPass;
+  VkPipeline graphicsPipeline;
+  std::vector<VkFramebuffer> swapChainFramebuffers; /// holds all framebuffers
+
   VkDebugUtilsMessengerEXT debugMesseger;
   GLFWwindow *window;
   VkInstance instance;
