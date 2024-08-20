@@ -223,6 +223,11 @@ private:
       glfwPollEvents();
       drawFrame();
     }
+
+    // as all operations are async in drwaFrame() & when exiting the mainLoop,
+    // drawing amy still be going on, cleaning things up while drawing is a bad
+    // idea
+    vkDeviceWaitIdle(device);
   }
 
   /**
@@ -244,14 +249,16 @@ private:
     // semaphore are used to order work inside the same & different queues
     // there two kinds of semaphores in Vulkan: binary & timeline, we use binary
     // here its either unsignaled or signaled we use it as signal semaphore in
-    // one queue operation & as a wait operation in another queue operation for
-    // ordering exeuction on the CPU we use a fence as a similar mechanism
+    // one queue operation & as a wait operation in another queue operation, for
+    // ordering execution on the CPU we use a fence as a similar mechanism
     // -> if the host needs to know when the GPU has finished something we use a
-    // fence So semaphores are used to specify the execution of order of
-    // operations on the GPU while fences are used to keep the CPU&GPU in sync
-    // with each other. We want to use semaphres for swapchain operations (they
-    // happen on the GPU) for waiting on the previous frame to finish we want to
-    // use fences, we need the host to wait (CPU)
+    // fence
+    // -> semaphores are used to specify the execution of order of operations on
+    // the GPU
+    // -> fences are used to keep the CPU&GPU in sync with each other. We want
+    // to use semaphores for swapchain operations (they happen on the GPU) for
+    // waiting on the previous frame to finish we want to use fences, we need
+    // the host to wait (CPU)
     vkWaitForFences(device, 1, &inFlightFence, VK_TRUE,
                     UINT64_MAX); /// disabled wit UINT64_MAX the timeout
 
@@ -343,6 +350,12 @@ private:
     glfwTerminate();
   }
 
+  /**
+   * There is no global state in Vulkan and all per-application state is stored
+   * in a VkInstance object. Creating a VkInstance object initializes the Vulkan
+   * library and allows the application to pass information about itself to the
+   * implementation.
+   * */
   void createInstance() {
     // 0. check for validationLayers (debugging)
     if (enableValidationLayers && not checkValidationLayerSupport()) {
@@ -540,7 +553,7 @@ private:
                                          nullptr);
 
     if (formatCount != 0) {
-      // make sure that the evctor can hold all formats
+      // make sure that the vector can hold all formats
       details.formats.resize(formatCount);
       vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount,
                                            details.formats.data());
@@ -643,6 +656,12 @@ private:
     }
   }
 
+  /**
+   *Vulkan separates the concept of physical and logical devices. A physical
+   *device usually represents a single complete implementation of Vulkan
+   *(excluding instance-level functionality) available to the host, of which
+   *there are a finite number.
+   * */
   void pickPhysicalDevice() {
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -852,7 +871,12 @@ private:
   /*
   ** An imagevieview is sufficient to start using an image as a texture, but to
   *  be rendered a frambuffer is needed (see graphic-pipelines-creation)
-  */
+  *
+  *  An image view is quite literally a view into an image. It describes how to
+  *  access the image and which part of the image to access, for example if it
+  *  should be treated as a 2D texture depth texture without any mipmapping
+  *  levels.
+  *   */
   void createImageViews() {
     swapChainImageViews.resize(swapChainImages.size());
 
@@ -864,6 +888,9 @@ private:
       createInfo.format = swapChainImageFormat;
       // allow to swizzle the  color  channels around , e.g. map all channels to
       // the red channel for a monochrome texture: here we stick to the default
+      // The swizzle can rearrange the components of the texel, or substitute
+      // zero or one for any components. It is defined as follows for each color
+      // component:
       createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
       createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
       createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -887,9 +914,10 @@ private:
     }
   }
 
-  /*
-   * Before creating the pipeline we need to tell Vulkan about the framebuffer
-   * attachements that will be used while rendering.
+  /* Draw commands must be recorded within a render pass instance. Each render
+   * pass instance defines a set of image resources, referred to as attachments,
+   * used during rendering. Before creating the pipeline we need to tell Vulkan
+   * about the framebuffer attachements that will be used while rendering.
    */
   void createRenderPass() {
     VkAttachmentDescription colorAttachment{};
@@ -965,8 +993,12 @@ private:
   ** The graphics pipeline is the sequence of operations that take the vertices
   *  & textures of the meshes all the way to render the pixels in the render
   *  targets.
-  ** Vertex/index buffer -> Input Assembler -> Vertex shader ->Tessellation -> Geometry shader -> Rasterization -> Fragment shader -> Color blending -> Frame buffer
-  */
+  *
+  *  rough states:
+  *  Vertex/index buffer -> Input Assembler -> Vertex shader
+  *  ->Tessellation -> Geometry shader -> Rasterization
+  *  -> Fragment shader -> Color blending -> Frame buffer
+  **/
   // clang-format on
   void createGraphicsPipeline() {
     auto vertShaderCode = readFile("shaders/vert.spv");
@@ -974,6 +1006,7 @@ private:
 
     // compilation & linking from SPIR-V bytecode to machinecode will not happen
     // until the graphic pipeline is created so we need local variables ...
+    // (glslc INPUTCODE.vert -o vert.spv)
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
 
@@ -998,8 +1031,8 @@ private:
 
     // this will cause the configuration of these values to be ignored & you
     // need to specify the data at drawing time this results in a more flexible
-    // setup
-    // these can be made dynamic or static, well go dynamic as its more flexible
+    // setup (valuescan be made dynamic or static), well go dynamic as its more
+    // flexible
     std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_SCISSOR,
                                                  VK_DYNAMIC_STATE_VIEWPORT};
 
@@ -1196,7 +1229,7 @@ private:
       throw std::runtime_error("failed to create graphics pipeline!");
     }
 
-    //.. and need to cleanup them here ...
+    //.. and need to cleanup the shaderModules here ...
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
   }
@@ -1219,7 +1252,7 @@ private:
       VkFramebufferCreateInfo framebufferInfo{};
       framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
       // specifiy which renderpass the framebuffer needs to be compatible with
-      // they need to use the samenumber and types of attachments
+      // they need to use the same number and types of attachments
       framebufferInfo.renderPass = renderPass;
       // specify the VkImageView objects
       framebufferInfo.attachmentCount = 1;
@@ -1235,6 +1268,11 @@ private:
     }
   }
 
+  /**
+   * Command pools are opaque objects that command buffer memory is allocated
+   * from, and which allow the implementation to amortize the cost of resource
+   * creation across multiple command buffers.
+   * */
   void createCommandPool() {
     QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
 
@@ -1250,7 +1288,7 @@ private:
                                                          /// together
     // command buffers are executed by submitting them on one of the device
     // queues each command can only allocate command buffers that are submitted
-    // on a single type of queue we chhose commands for drawing so graphics
+    // on a single type of queue we chose commands for drawing so graphics
     // queue family is chosen
     poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
 
@@ -1286,7 +1324,7 @@ private:
         VK_FENCE_CREATE_SIGNALED_BIT; /// first call to vkWaitForFence() returns
                                       /// immediately instead of waiting for
                                       /// previous frames (which do not exist at
-                                      /// this time ...)
+                                      /// the beginning)
 
     if (vkCreateSemaphore(device, &semaphoreInfo, nullptr,
                           &imageAvailableSemaphore) != VK_SUCCESS ||
