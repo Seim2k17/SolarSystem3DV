@@ -1775,15 +1775,14 @@ class TriangleApp {
         bufferInfo.usage = usage;
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        if (vkCreateBuffer(device, &bufferInfo, nullptr, &vertexBuffer)
-            != VK_SUCCESS)
+        if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
         {
             throw std::runtime_error("failed to create vertex buffer");
         }
 
         // buffer created but no memory allocated for it
         VkMemoryRequirements memRequirements;
-        vkGetBufferMemoryRequirements(device, vertexBuffer, &memRequirements);
+        vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
 
         VkMemoryAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -1793,7 +1792,13 @@ class TriangleApp {
                 .memoryTypeBits, // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
             properties);
 
-        if (vkAllocateMemory(device, &allocInfo, nullptr, &vertexBufferMemory)
+        // for a large number of allocations (or a real
+        // world app) its good practice to create a
+        // custom memory allocator or use:
+        // https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+        // the maximum number of allocation is also
+        // limited ba "maxMemoryAllocationCount"
+        if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory)
             != VK_SUCCESS)
         {
             throw std::runtime_error(
@@ -1817,27 +1822,97 @@ class TriangleApp {
     void createVertexBuffer()
     {
         VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+
         createBuffer(
             bufferSize,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,   /// can be used as a source
+                                                /// in a memory transfer
+                                                /// operation
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT /// Use a memory heap that is
                                                 /// host coherent,
                 | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            vertexBuffer,
-            vertexBufferMemory);
+            stagingBuffer,
+            stagingBufferMemory);
         // copy the vertex data to the buffer by mapping the buffermemory into
         // CPU accessible memor
         void *data;
-        vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(
-            data,
-            vertices.data(),
-            bufferSize); /// Unfortunately the driver may not immediately copy
-                         /// the data into the buffer memory, for example
-                         /// because of caching. It is also possible that writes
-                         /// to the buffer are not visible in the mapped memory
-                         /// yet. There are two ways to deal with that problem:
-        vkUnmapMemory(device, vertexBufferMemory);
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data,
+               vertices.data(),
+               (size_t)
+                   bufferSize); /// Unfortunately the driver may not immediately
+                                /// copy the data into the buffer memory, for
+                                /// example because of caching. It is also
+                                /// possible that writes to the buffer are not
+                                /// visible in the mapped memory yet. There are
+                                /// two ways to deal with that problem:
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        // memory is allocated from a memory type that is device local (not able
+        // to use vkMapMemory)
+        createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT /// can be used as a destination
+                                             /// in
+                                             /// a memory operation
+                | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            vertexBuffer,
+            vertexBufferMemory);
+
+        copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+
+        // clean staging buffer
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    /**
+     * Memory tranfer operations are executed using command buffers (like
+     * drawing commands)
+     * */
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+    {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = commandPool;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+
+        // record the command buffer
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags
+            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // tell the driver
+                                                           // about our intent
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = 0; // Optional
+        copyRegion.dstOffset = 0; // Optional
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        // after recording the commandBuffer we execute the command buffer to
+        // complete the transfer
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(graphicsQueue);
+        // cleanup command  buffer
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     }
 
     /**
