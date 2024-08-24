@@ -120,3 +120,20 @@ const std::vector<Vertex> vertices = {{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
 // index buffer related for removing duplicated vertices
 const std::vector<uint16_t> indices
     = {0, 1, 2, 2, 3, 0}; /// atm we sticking to max ~65k vertices (16bit)
+
+/**
+ * UBO as a descriptor set layout which specifies the types of ressources going
+ * to be accesed by the pipeline Usage of descriptors consists of three parts:
+ * - Specify a descriptor set layout during pipeline creation
+ * - Allocate a descriptor set from a descriptor pool
+ * - Bind the descriptor set during rendering
+ * A descriptor set specifies the actual buffer or image resources that will be
+ * bound to the descriptors, just like a framebuffer specifies the actual image
+ * views to bind to render pass attachments. The descriptor set is then bound
+ * for the drawing commands just like the vertex buffers and framebuffer.
+ * */
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};

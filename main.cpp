@@ -1,16 +1,29 @@
 #include "data_types.h"
 #include "helper_utilities.h"
 
-#include <GLFW/glfw3native.h>
+#include <algorithm>
 #include <array>
 #include <bits/stdint-uintn.h>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
-#include <glm/fwd.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <ios>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <vector>
+
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
+
+#include <GLFW/glfw3native.h>
 
 #ifdef WIN32
 #include <vulkan/vulkan_win32.h>
@@ -22,18 +35,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include <algorithm>
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <limits>
-#include <map>
-#include <optional>
-#include <set>
-#include <stdexcept>
-#include <vector>
-
+#include <glm/fwd.hpp>
 #include <glm/glm.hpp> // llinear algebra types
+#include <glm/gtc/matrix_transform.hpp>
 
 class TriangleApp {
   public:
@@ -147,11 +151,15 @@ class TriangleApp {
         createSwapChain();
         createImageViews();
         createRenderPass();
+        createDescriptorSetLayout();
         createGraphicsPipeline();
         createFrameBuffers();
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
+        createUniformBuffers();
+        createDescriptorPool();
+        createDescriptorSets();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -233,6 +241,8 @@ class TriangleApp {
             throw std::runtime_error("failed to aquire swap chain image!");
         }
 
+        updateUniformBuffer(currentFrame);
+
         // only reset the fence if we are submitting work
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -310,9 +320,76 @@ class TriangleApp {
                                       /// MAX_FRAMES_IN_FLIGHT enqueued frames.
     }
 
+    /**
+     *  Generate a new transformation every frame to make the geometry spin
+     * around. Using a UBO this way is not the most efficient way to pass
+     * frequently changing values to the shader. A more efficient way to pass a
+     * small buffer of data to shaders are push constants. Upcoming !
+     * */
+    void updateUniformBuffer(uint32_t currentImage)
+    {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(
+                         currentTime - startTime)
+                         .count();
+
+        UniformBufferObject ubo{};
+        /**
+         * The glm::rotate function takes an existing transformation, rotation
+         * angle and rotation axis as parameters. The glm::mat4(1.0f)
+         * constructor returns an identity matrix. Using a rotation angle of
+         * time * glm::radians(90.0f) accomplishes the purpose of rotation 90
+         * degrees per second.
+         * */
+        ubo.model = glm::rotate(glm::mat4(1.0f),
+                                time * glm::radians(90.0f),
+                                glm::vec3(.0f, .0f, 1.0f));
+        /**
+         * view transformation: look at the geometry from above at a 45 degree
+         * angle. The glm::lookAt function takes the eye position, center
+         * position and up axis as parameters.
+         * */
+        ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+                               glm::vec3(0.0f, 0.0f, 0.0f),
+                               glm::vec3(0.0f, 0.0f, 1.0f));
+
+        /**
+         * Perspective projection with a 45 degree vertical field-of-view. The
+         * other parameters are the aspect ratio, near and far view planes. It
+         * is important to use the current swap chain extent to calculate the
+         * aspect ratio to take into account the new width and height of the
+         * window after a resize.
+         * */
+        ubo.proj = glm::perspective(glm::radians(45.0f),
+                                    swapChainExtent.width
+                                        / (float)swapChainExtent.height,
+                                    0.1f,
+                                    10.0f);
+        // GLM was originally designed for OpenGL, where the Y coordinate of the
+        // clip coordinates is inverted. The easiest way to compensate for that
+        // is to flip the sign on the scaling factor of the Y axis in the
+        // projection matrix. If you don’t do this, then the image will be
+        // rendered upside down
+        ubo.proj[1][1] *= -1;
+
+        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+    }
+
     void cleanup()
     {
         cleanUpSwapChain();
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            vkDestroyBuffer(device, uniformBuffers[i], nullptr);
+            vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
+        }
+
+        vkDestroyDescriptorPool(
+            device, descriptorPool, nullptr); // also cleans up DescriptorSets
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
         vkDestroyBuffer(device, indexBuffer, nullptr);
         vkFreeMemory(device, indexBufferMemory, nullptr);
@@ -1079,6 +1156,34 @@ class TriangleApp {
         }
     }
 
+    void createDescriptorSetLayout()
+    {
+        // Every binding needs to be described through a
+        // VkDescriptorSetLayoutBinding struct.
+        VkDescriptorSetLayoutBinding uboLayoutBinding{};
+        uboLayoutBinding.binding = 0; // binding used in the shader
+        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboLayoutBinding.descriptorCount = 1;
+        // in which shader stage the descriptor is going to be referenced, can
+        // be a combination of VkShaderStageFlagBits values or the value
+        // VK_SHADER_STAGE_ALL_GRAPHICS
+        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        // only relevant for image sampling related descriptors
+        uboLayoutBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &uboLayoutBinding;
+
+        if (vkCreateDescriptorSetLayout(
+                device, &layoutInfo, nullptr, &descriptorSetLayout)
+            != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create descriptor set layout!");
+        }
+    }
+
     // clang-format off
   /*
   ** The graphics pipeline is the sequence of operations that take the vertices
@@ -1218,8 +1323,8 @@ class TriangleApp {
         rasterizer.cullMode
             = VK_CULL_MODE_BACK_BIT; /// type of faceculling to use
         rasterizer.frontFace
-            = VK_FRONT_FACE_CLOCKWISE; /// specifies the vertex order for faces
-                                       /// to be considered
+            = VK_FRONT_FACE_COUNTER_CLOCKWISE; /// specifies the vertex order
+                                               /// for faces to be considered
         rasterizer.depthBiasEnable
             = VK_FALSE; /// used for shadow mapping, wont use it for now
         rasterizer.depthBiasConstantFactor = 0.0f; /// optional
@@ -1286,13 +1391,13 @@ class TriangleApp {
         // used to pass the transformation matrix to the vertex shader, or to
         // create texture samplers in the fragment shader. These uniform values
         // need to be specified during pipeline creation by creating a
-        // VkPipelineLayout object.
+        // VkPipelineLayout object. see createDescriptorSetLayout()
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType
             = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 0;         // Optional
-        pipelineLayoutInfo.pSetLayouts = nullptr;      // Optional
-        pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
+        pipelineLayoutInfo.setLayoutCount = 1;                 // Optional
+        pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout; // Optional
+        pipelineLayoutInfo.pushConstantRangeCount = 0;         // Optional
         pipelineLayoutInfo.pPushConstantRanges
             = nullptr; // Optional, another way of passing dynamic values to
                        // shaders
@@ -1582,6 +1687,16 @@ class TriangleApp {
         scissor.offset = {0, 0};
         scissor.extent = swapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        // Unlike vertex and index buffers, descriptor sets are not unique to
+        // graphics pipelines.
+        vkCmdBindDescriptorSets(commandBuffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineLayout,
+                                0,
+                                1,
+                                &descriptorSets[currentFrame],
+                                0,
+                                nullptr);
 
         // vertexCount = size of vertices-list, instanceCount = 1 (for instanced
         // rendering), firstVertex: used as an offest into the vertex buffer
@@ -1750,6 +1865,110 @@ class TriangleApp {
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
+    void createUniformBuffers()
+    {
+        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+        uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            createBuffer(bufferSize,
+                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                             | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                         uniformBuffers[i],
+                         uniformBuffersMemory[i]);
+            // We map the buffer right after creation using vkMapMemory to get a
+            // pointer to which we can write the data later on. The buffer stays
+            // mapped to this pointer for the application’s whole lifetime. This
+            // technique is called "persistent mapping" and works on all Vulkan
+            // implementations. Not having to map the buffer every time we need
+            // to update it increases performances, as mapping is not free.
+            vkMapMemory(device,
+                        uniformBuffersMemory[i],
+                        0,
+                        bufferSize,
+                        0,
+                        &uniformBuffersMapped[i]);
+        }
+    }
+
+    /**
+     * Descriptor sets can’t be created directly, they must be allocated from a
+     * pool like command buffers.
+     * */
+    void createDescriptorPool()
+    {
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        // We will allocate one of these descriptors for every frame.
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool)
+            != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create descriptor pool!");
+        }
+    }
+
+    void createDescriptorSets()
+    {
+        // In our case we will create one descriptor set for each frame in
+        // flight, all with the same layout. Unfortunately we do need all the
+        // copies of the layout because the next function expects an array
+        // matching the number of sets.
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT,
+                                                   descriptorSetLayout);
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount
+            = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        allocInfo.pSetLayouts = layouts.data();
+        descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data())
+            != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to allocate descriptor sets!");
+        }
+        // now as they are allocated they need to be configured
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = uniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(UniformBufferObject);
+
+            VkWriteDescriptorSet descriptorWrite{};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = descriptorSets[i];
+            descriptorWrite.dstBinding = 0;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pBufferInfo
+                = &bufferInfo; /// used for descriptors that refer to buffer
+                               /// data
+            descriptorWrite.pImageInfo
+                = nullptr; // Optional, used for descriptors that refer to image
+                           // data
+            descriptorWrite.pTexelBufferView
+                = nullptr; // Optional, used for descriptors that refer to
+                           // buffer views
+
+            vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+        }
+    }
+
     /**
      * Memory tranfer operations are executed using command buffers (like
      * drawing commands)
@@ -1769,8 +1988,9 @@ class TriangleApp {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags
-            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // tell the driver
-                                                           // about our intent
+            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // tell the
+                                                           // driver about
+                                                           // our intent
 
         vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
@@ -1782,8 +2002,8 @@ class TriangleApp {
 
         vkEndCommandBuffer(commandBuffer);
 
-        // after recording the commandBuffer we execute the command buffer to
-        // complete the transfer
+        // after recording the commandBuffer we execute the command buffer
+        // to complete the transfer
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
@@ -1802,8 +2022,8 @@ class TriangleApp {
      *
      * @param typeFilter  specify the bit field of memory types that are
      * suitable.
-     * @param properties  define special features of the memory, like being able
-     *                    to map it so we can write to it from the CPU
+     * @param properties  define special features of the memory, like being
+     * able to map it so we can write to it from the CPU
      * */
     uint32_t findMemoryType(uint32_t typeFilter,
                             VkMemoryPropertyFlags properties)
@@ -1852,8 +2072,8 @@ class TriangleApp {
         createInfo = {};
         createInfo.sType
             = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        createInfo.messageSeverity = /// sepcify all types of severity to let
-                                     /// tha callback be called for
+        createInfo.messageSeverity = /// sepcify all types of severity to
+                                     /// let tha callback be called for
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
             | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
             | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -1874,8 +2094,8 @@ class TriangleApp {
         VkDebugUtilsMessengerCreateInfoEXT createInfo;
         populateDebugMessengerCreateInfo(createInfo);
 
-        // requires a valid instance have been created -> to validate all code
-        // before this we can use a sepatare debug utils messenger
+        // requires a valid instance have been created -> to validate all
+        // code before this we can use a sepatare debug utils messenger
         if (CreateDebugUtilsMessengerEXT(
                 instance, &createInfo, nullptr, &debugMesseger)
             != VK_SUCCESS)
@@ -1886,11 +2106,12 @@ class TriangleApp {
 
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     // logical device to interface with
-    // could setup more logical device from one physical device for different
-    // requirements
+    // could setup more logical device from one physical device for
+    // different requirements
     VkDevice device;
-    // queues are automatically created with the logical device but we need a
-    // handle to interface with, the are implicitly cleaned up with the device
+    // queues are automatically created with the logical device but we need
+    // a handle to interface with, the are implicitly cleaned up with the
+    // device
     VkQueue graphicsQueue;
     VkSurfaceKHR surface;
     VkQueue presentQueue;
@@ -1902,18 +2123,19 @@ class TriangleApp {
     // access the image and which part of the image, should be treated as 2D
     // depth texture wothout any mimapping levels
     std::vector<VkImageView> swapChainImageViews;
+    VkDescriptorSetLayout descriptorSetLayout;
     VkPipelineLayout pipelineLayout;
     VkRenderPass renderPass;
     VkPipeline graphicsPipeline;
     std::vector<VkFramebuffer> swapChainFramebuffers; /// holds all framebuffers
 
-    VkCommandPool
-        commandPool; /// manages the memory that is used to store the buffers
-                     /// and command buffers which are allocated from them
+    VkCommandPool commandPool; /// manages the memory that is used to store
+                               /// the buffers and command buffers which are
+                               /// allocated from them
     std::vector<VkCommandBuffer>
-        commandBuffers; /// with frames in flight (concurrent processed ones)
-                        /// each frame needs its own set of commandbuffers &
-                        /// semaphores & fences
+        commandBuffers; /// with frames in flight (concurrent processed
+                        /// ones) each frame needs its own set of
+                        /// commandbuffers & semaphores & fences
     VkDebugUtilsMessengerEXT debugMesseger;
     GLFWwindow *window;
     VkInstance instance;
@@ -1922,6 +2144,8 @@ class TriangleApp {
     std::vector<VkSemaphore> renderFinishedSemaphores;
     std::vector<VkFence> inFlightFences;
 
+    uint32_t currentFrame = 0;
+
     bool framebufferResized = false;
 
     VkBuffer vertexBuffer;
@@ -1929,7 +2153,18 @@ class TriangleApp {
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
 
-    uint32_t currentFrame = 0;
+    // We should have multiple buffers, because multiple frames may be in
+    // flight at the same time and we don’t want to update the buffer in
+    // preparation of the next frame while a previous one is still reading
+    // from it! Thus, we need to have as many uniform buffers as we have
+    // frames in flight, and write to a uniform buffer that is not currently
+    // being read by the GPU.
+    std::vector<VkBuffer> uniformBuffers;
+    std::vector<VkDeviceMemory> uniformBuffersMemory;
+    std::vector<void *> uniformBuffersMapped;
+
+    VkDescriptorPool descriptorPool;
+    std::vector<VkDescriptorSet> descriptorSets;
 };
 
 int

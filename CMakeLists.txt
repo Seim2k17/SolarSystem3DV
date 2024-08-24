@@ -38,6 +38,7 @@ target_link_libraries(vulkanTut PRIVATE
   Xi
   fmt::fmt
   stdc++
+  -lm
 )
 
 add_custom_target(cleanup COMMAND rm -rf *)
