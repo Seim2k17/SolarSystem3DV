@@ -200,9 +200,14 @@ struct Vertex {
 
 // position and color values combined in one array of vertices (== interleaving
 // vertex attributes)
-const std::vector<Vertex> vertices = {{{0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-                                      {{0.5f, 0.5f}, {0.0f, 0.7f, 0.0f}},
-                                      {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}};
+const std::vector<Vertex> vertices = {{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+                                      {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+                                      {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+                                      {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}};
+
+// index buffer related for removing duplicated vertices
+const std::vector<uint16_t> indices
+    = {0, 1, 2, 2, 3, 0}; /// atm we sticking to max ~65k vertices (16bit)
 
 class TriangleApp {
   public:
@@ -320,6 +325,7 @@ class TriangleApp {
         createFrameBuffers();
         createCommandPool();
         createVertexBuffer();
+        createIndexBuffer();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -481,6 +487,9 @@ class TriangleApp {
     void cleanup()
     {
         cleanUpSwapChain();
+
+        vkDestroyBuffer(device, indexBuffer, nullptr);
+        vkFreeMemory(device, indexBufferMemory, nullptr);
 
         vkDestroyBuffer(device, vertexBuffer, nullptr);
         vkFreeMemory(device, vertexBufferMemory, nullptr);
@@ -1725,6 +1734,11 @@ class TriangleApp {
                                1,
                                vertexBuffers,
                                offsets); /// bind vertex buffers to bindings
+        // only possible to have  a single index buffer
+        // not possible to use different indices for each vertex attribute (if
+        // one attribute varies we still have to duplicate vertex data)
+        vkCmdBindIndexBuffer(
+            commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
         // as viewport and scissor state is dynamic we need to set them in
         // cmmand buffer before drawing
@@ -1748,8 +1762,12 @@ class TriangleApp {
         // defines the lowest value of gl_VertexIndex firstInstance:Used as an
         // offset for instanced rendering, defines the lowest value of
         // gl_InstanceIndex
-        vkCmdDraw(
-            commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        // vkCmdDraw(
+        //    commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+
+        // when using an indexbuffer this is the method to draw stuff
+        vkCmdDrawIndexed(
+            commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
 
@@ -1866,6 +1884,42 @@ class TriangleApp {
         copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
 
         // clean staging buffer
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    /**
+     * Almost the same as VertexBuffer creation, but size is sizeof(indices) and
+     * we're using the VK_BUFFER_USAGE_INDEX_BUFFER_BIT flag to create the
+     * buffer
+     * */
+    void createIndexBuffer()
+    {
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize,
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                         | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     stagingBuffer,
+                     stagingBufferMemory);
+
+        void *data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, indices.data(), (size_t)bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(bufferSize,
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                         | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                     indexBuffer,
+                     indexBufferMemory);
+
+        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
@@ -2046,6 +2100,8 @@ class TriangleApp {
 
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
+    VkBuffer indexBuffer;
+    VkDeviceMemory indexBufferMemory;
 
     uint32_t currentFrame = 0;
 };
