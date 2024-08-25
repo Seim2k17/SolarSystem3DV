@@ -15,10 +15,12 @@ set(MAIN "main.cpp")
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake/;${CMAKE_MODULE_PATH}")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_COMPILER "gcc")
-
+set(INCLUDE_THIRDPARTY_FOLDER "includeLibs/")
 find_package(fmt REQUIRED)
 
-add_executable(vulkanTut "main.cpp")#${MAIN})
+
+add_executable(vulkanTut "main.cpp") # ${stbImg})
+target_include_directories(vulkanTut PUBLIC  "${INCLUDE_THIRDPARTY_FOLDER}")
 
 # Set compile options
 target_compile_options(vulkanTut PRIVATE
