@@ -158,6 +158,8 @@ class TriangleApp {
         createFrameBuffers();
         createCommandPool();
         createTextureImage();
+        createTextureImageView();
+        createTextureSampler();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -384,6 +386,8 @@ class TriangleApp {
     {
         cleanUpSwapChain();
 
+        vkDestroySampler(device, textureSampler, nullptr);
+        vkDestroyImageView(device, textureImageView, nullptr);
         vkDestroyImage(device, textureImage, nullptr);
         vkFreeMemory(device, textureImageMemory, nullptr);
 
@@ -862,7 +866,11 @@ class TriangleApp {
                                 && not swapChainSupport.presentModes.empty();
         }
 
-        return indices.isComplete() && extensionsSupported && swapChainAdequate;
+        VkPhysicalDeviceFeatures supportedFeatures;
+        vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
+
+        return indices.isComplete() && extensionsSupported && swapChainAdequate
+               && supportedFeatures.samplerAnisotropy;
     }
 
     void createLogicalDevice()
@@ -887,6 +895,8 @@ class TriangleApp {
         }
 
         VkPhysicalDeviceFeatures deviceFeatures{};
+        deviceFeatures.samplerAnisotropy
+            = VK_TRUE; /// optional feature, we need explicitly request it
         vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
 
         VkDeviceCreateInfo createInfo{};
@@ -1034,6 +1044,41 @@ class TriangleApp {
         swapChainExtent = extent;
     }
 
+    VkImageView createImageView(VkImage image, VkFormat format)
+    {
+        VkImageViewCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        createInfo.image = image;
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        createInfo.format = format;
+        // allow to swizzle the  color  channels around , e.g. map all
+        // channels to the red channel for a monochrome texture: here we
+        // stick to the default The swizzle can rearrange the components of
+        // the texel, or substitute zero or one for any components. It is
+        // defined as follows for each color component:
+        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        // describes the purpose of the image and which part of the image
+        // should be accessed here our images are color targets without
+        // mipmapping levels or multiple layers
+        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount
+            = 1; /// working with a stereographic 3D app, a swap chain with
+                 /// multiple layers is needed (VR?)
+
+        VkImageView imageView;
+        if (vkCreateImageView(device, &createInfo, nullptr, &imageView)
+            != VK_SUCCESS)
+        { /// manual creation process demands a manual destroy !
+            throw std::runtime_error("failed to create image views!");
+        }
+        return imageView;
+    }
     /*
     ** An imagevieview is sufficient to start using an image as a texture, but
     *to be rendered a frambuffer is needed (see graphic-pipelines-creation)
@@ -1049,37 +1094,8 @@ class TriangleApp {
 
         for (size_t i = 0; i < swapChainImages.size(); i++)
         {
-            VkImageViewCreateInfo createInfo{};
-            createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            createInfo.image = swapChainImages[i];
-            createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            createInfo.format = swapChainImageFormat;
-            // allow to swizzle the  color  channels around , e.g. map all
-            // channels to the red channel for a monochrome texture: here we
-            // stick to the default The swizzle can rearrange the components of
-            // the texel, or substitute zero or one for any components. It is
-            // defined as follows for each color component:
-            createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            // describes the purpose of the image and which part of the image
-            // should be accessed here our images are color targets without
-            // mipmapping levels or multiple layers
-            createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            createInfo.subresourceRange.baseMipLevel = 0;
-            createInfo.subresourceRange.levelCount = 1;
-            createInfo.subresourceRange.baseArrayLayer = 0;
-            createInfo.subresourceRange.layerCount
-                = 1; /// working with a stereographic 3D app, a swap chain with
-                     /// multiple layers is needed (VR?)
-
-            if (vkCreateImageView(
-                    device, &createInfo, nullptr, &swapChainImageViews[i])
-                != VK_SUCCESS)
-            { /// manual creation process demands a manual destroy !
-                throw std::runtime_error("failed to create image views!");
-            }
+            swapChainImageViews[i]
+                = createImageView(swapChainImages[i], swapChainImageFormat);
         }
     }
 
@@ -1676,6 +1692,71 @@ class TriangleApp {
         }
 
         vkBindImageMemory(device, image, imageMemory, 0);
+    }
+
+    /**
+     * Images are accessed through image views rather than directly
+     * */
+    void createTextureImageView()
+    {
+        // almmost the same as createImageViews() except format and image
+        textureImageView
+            = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+    }
+
+    /**
+     * Textures are usually accessed through samplers, which will apply
+     * filtering and transformations to compute the final color that is
+     * retrieved. These filters are helpful to deal with problems like
+     * oversampling.
+     * */
+    void createTextureSampler()
+    {
+        VkSamplerCreateInfo
+            samplerInfo{}; /// specifies all filters & transformations that it
+                           /// should apply
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter
+            = VK_FILTER_LINEAR; /// how to interpolate texels that are magnified
+                                /// or minified
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.addressModeU
+            = VK_SAMPLER_ADDRESS_MODE_REPEAT; /// mode for texturespace
+                                              /// coordinate for x
+        samplerInfo.addressModeV
+            = VK_SAMPLER_ADDRESS_MODE_REPEAT; /// mode for texturespace
+                                              /// coordinate for y
+        samplerInfo.addressModeW
+            = VK_SAMPLER_ADDRESS_MODE_REPEAT; /// mode for texturespace
+        /// coordinate for z
+
+        samplerInfo.anisotropyEnable = VK_FALSE;
+        samplerInfo.maxAnisotropy = 1.0f;
+
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+        samplerInfo.maxAnisotropy
+            = properties.limits.maxSamplerAnisotropy; /// max quality
+        samplerInfo.borderColor
+            = VK_BORDER_COLOR_INT_OPAQUE_BLACK; /// no arbitrary color allowed
+        samplerInfo.unnormalizedCoordinates
+            = VK_FALSE; /// which coordinate system to use to adress texels in
+                        /// an image, TRUE: [0,texWidth / 0,texHeight], FALSE:
+                        /// [0,1) = normmalilzed coordinates
+
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+        // Mipmapping related
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.mipLodBias = 0.0f;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 0.0f;
+
+        if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler)
+            != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create texture sampler!");
+        }
     }
 
     void createCommandBuffers()
@@ -2439,6 +2520,8 @@ class TriangleApp {
 
     VkImage textureImage;
     VkDeviceMemory textureImageMemory;
+    VkImageView textureImageView;
+    VkSampler textureSampler;
 };
 
 int
