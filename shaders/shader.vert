@@ -7,7 +7,11 @@
 
 layout(location = 0) in vec2 inPosition;
 layout(location = 1) in vec3 inColor; // input taken from a vertex buffer
+layout(location = 2) in vec2 inTexCoord; // input for uv coordinates taken from a vertex buffer
+
+
 layout(location = 0) out vec3 fragColor;
+layout(location = 1) out vec2 fragTexCoord;
 
 // specify a descriptor set layout for each descriptor when creating the pipeline layout
 // shaders reference the specific descriptor set like
@@ -22,4 +26,5 @@ void main() {
     // gl_Position = vec4(inPosition, 0.0, 1.0);
     gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 0.0, 1.0);
     fragColor = inColor;
+    fragTexCoord = inTexCoord;
 }
