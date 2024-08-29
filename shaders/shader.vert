@@ -5,7 +5,7 @@
 // some types use multiplpe slots (index must at least be 2 or higher)
 //layout(location = 2) in vec3 inColor;
 
-layout(location = 0) in vec2 inPosition;
+layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor; // input taken from a vertex buffer
 layout(location = 2) in vec2 inTexCoord; // input for uv coordinates taken from a vertex buffer
 
@@ -24,7 +24,7 @@ layout (set = 0, binding = 0) uniform UniformBufferObject {
 void main() {
     // 1. approach static positions
     // gl_Position = vec4(inPosition, 0.0, 1.0);
-    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 0.0, 1.0);
+    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
     fragColor = inColor;
     fragTexCoord = inTexCoord;
 }
