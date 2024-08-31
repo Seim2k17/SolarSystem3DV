@@ -11,7 +11,7 @@ local/
 *.slo
 *.lo
 *.o
-*.obj
+#*.obj these are also extension for 3D mmodels
 
 # Precompiled Headers
 *.gch

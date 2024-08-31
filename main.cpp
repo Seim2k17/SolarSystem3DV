@@ -3,6 +3,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "includeLibs/stb_image.h"
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "includeLibs/tiny_obj_loader.h"
+
 #include <algorithm>
 #include <array>
 #include <bits/stdint-uintn.h>
@@ -19,6 +22,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include <vulkan/vk_platform.h>
@@ -121,7 +125,10 @@ class TriangleApp {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API,
                        GLFW_NO_API); /// do not a OpenGL context
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        glfwWindowHint(GLFW_RESIZABLE,
+                       GLFW_FALSE); // FIXME: resizing window lead to crashes,
+                                    // so I disabled it for now using a bigger
+                                    // resolution instead
         window = glfwCreateWindow(
             WINDOW_WIDTH,
             WINDOW_HEIGHT,
@@ -161,6 +168,7 @@ class TriangleApp {
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
+        loadModel();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -346,11 +354,11 @@ class TriangleApp {
          * The glm::rotate function takes an existing transformation, rotation
          * angle and rotation axis as parameters. The glm::mat4(1.0f)
          * constructor returns an identity matrix. Using a rotation angle of
-         * time * glm::radians(90.0f) accomplishes the purpose of rotation 90
-         * degrees per second.
+         * time * glm::radians(degrees) accomplishes the purpose of rotation
+         * DEGREES degrees per second.
          * */
         ubo.model = glm::rotate(glm::mat4(1.0f),
-                                time * glm::radians(90.0f),
+                                time * glm::radians(10.0f), /// slow: 10° / s
                                 glm::vec3(.0f, .0f, 1.0f));
         /**
          * view transformation: look at the geometry from above at a 45 degree
@@ -1713,11 +1721,14 @@ class TriangleApp {
     void createTextureImage()
     {
         int texWidth, texHeight, texChannels;
-        stbi_uc *pixels = stbi_load("textures/texture.jpg",
-                                    &texWidth,
-                                    &texHeight,
-                                    &texChannels,
-                                    STBI_rgb_alpha);
+        stbi_uc *pixels = stbi_load(
+            textureMap.at(Model::VikingRoom).c_str(),
+            // stbi_uc *pixels =
+            // stbi_load(textureMap.at(Model::TestRectangle).c_str(),
+            &texWidth,
+            &texHeight,
+            &texChannels,
+            STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels)
@@ -1853,6 +1864,92 @@ class TriangleApp {
         // almmost the same as createImageViews() except format and image
         textureImageView = createImageView(
             textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    }
+
+    /**
+     * Use thirdparty lib to load obj files / 3D models
+     * */
+    void loadModel()
+    {
+
+        // An OBJ file consists of positions, normals, texture coordinates and
+        // faces. Faces consist of an arbitrary amount of vertices, where each
+        // vertex refers to a position, normal and/or texture coordinate by
+        // index. This makes it possible to not just reuse entire vertices, but
+        // also individual attributes. Hold in the attrib containers
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+
+        // our app can only render triangles, LoadObj has an optional paramet
+        // which is set by default to triangulate faces
+        if (not tinyobj::LoadObj(&attrib,
+                                 &shapes,
+                                 &materials,
+                                 &warn,
+                                 &err,
+                                 modelMap.at(Model::VikingRoom).c_str()))
+        {
+            throw std::runtime_error(warn + err);
+        }
+
+        // there are many duplicated verticies in the model
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+        // combine all faces in the file into a single model
+        for (const auto &shape : shapes)
+        {
+            // bc of triangulation feature just iterate and dump them straight
+            // into vertices vector
+            for (const auto &index : shape.mesh.indices)
+            {
+                Vertex vertex{};
+
+                // For simplicity, we will assume that every vertex is unique
+                // for now, hence the simple auto-increment indices. The index
+                // variable is of type tinyobj::index_t, which contains the
+                // vertex_index, normal_index and texcoord_index members. We
+                // need to use these indices to look up the actual vertex
+                // attributes in the attrib arrays:
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index
+                                    + 0], // attrib.vertices is an array of
+                                          // float instead of glm::vec3 so
+                                          // multiplied by 3
+                    attrib
+                        .vertices[3 * index.vertex_index + 1], // 0=x, 1=y, 2=z
+                    attrib.vertices[3 * index.vertex_index + 2]};
+
+                // The OBJ format assumes a coordinate system where a vertical
+                // coordinate of 0 means the bottom of the image, however we’ve
+                // uploaded our image into Vulkan in a top to bottom orientation
+                // where 0 means the top of the image
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index
+                                     + 0], // two texture coordinates
+                    1.0f
+                        - attrib.texcoords[2 * index.texcoord_index
+                                           + 1] // 0=u, 1=v, flip vertical
+                                                // comp with 1.0f - ....
+
+                };
+                vertex.color = {1.0f, 1.0f, 1.0f};
+
+                if (uniqueVertices.count(vertex) == 0)
+                {
+                    uniqueVertices[vertex]
+                        = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                indices.push_back(uniqueVertices[vertex]);
+            }
+        }
+        std::cout << "Loaded model with: " << vertices.size() << " vertices"
+                  << std::endl;
+        std::cout << "Loaded model with: " << indices.size() << " indices"
+                  << std::endl;
     }
 
     /**
@@ -2061,7 +2158,7 @@ class TriangleApp {
         // not possible to use different indices for each vertex attribute (if
         // one attribute varies we still have to duplicate vertex data)
         vkCmdBindIndexBuffer(
-            commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+            commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         // as viewport and scissor state is dynamic we need to set them in
         // cmmand buffer before drawing
@@ -2717,6 +2814,9 @@ class TriangleApp {
 
     bool framebufferResized = false;
 
+    // vertices and indices for the loaded 3D-model
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
