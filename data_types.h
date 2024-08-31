@@ -19,17 +19,29 @@
 const uint32_t WINDOW_WIDTH = 1280;
 const uint32_t WINDOW_HEIGHT = 1024;
 
+enum class Axis { X, Y, Z };
+
 enum class Model {
     TestRectangle = 0,
+    Earth3D,
+    Earth3Dv3,
     VikingRoom,
 };
 
-static const std::map<Model, std::string> textureMap
-    = {{Model::TestRectangle, "textures/texture.jpg"},
-       {Model::VikingRoom, "textures/viking_room.png"}};
+static const std::map<Model, std::string> textureMap = {
+    {Model::TestRectangle, "textures/texture.jpg"},
+    {Model::VikingRoom, "textures/viking_room.png"},
+    {Model::Earth3D, "textures/texture_earth2.jpg"},
+    {Model::Earth3Dv3, "textures/texture_earth3.jpg"},
+
+};
 
 static const std::map<Model, std::string> modelMap
-    = {{Model::VikingRoom, "models/viking_room.obj"}};
+    = {{Model::VikingRoom, "models/viking_room.obj"},
+       {Model::Earth3D, "models/earth2.obj"},
+       {Model::Earth3Dv3, "models/earth3.obj"}
+
+};
 
 const int MAX_FRAMES_IN_FLIGHT
     = 2; /// how many frames should be processed concurrently ?

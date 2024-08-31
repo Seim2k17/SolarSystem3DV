@@ -255,7 +255,20 @@ class TriangleApp {
             throw std::runtime_error("failed to aquire swap chain image!");
         }
 
-        updateUniformBuffer(currentFrame);
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(
+                         currentTime - startTime)
+                         .count();
+
+        glm::mat4 finalModelMatrix = rotateModel(glm::vec3(1.0f, .0f, 1.0f),
+                                                 90.0f,
+                                                 glm::vec3(0.f, 1.f, .0f),
+                                                 7.5f,
+                                                 time);
+
+        updateUniformBuffer(currentFrame, finalModelMatrix);
 
         // only reset the fence if we are submitting work
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
@@ -332,6 +345,27 @@ class TriangleApp {
                                       /// ensure that the frame index loops
                                       /// around after every
                                       /// MAX_FRAMES_IN_FLIGHT enqueued frames.
+        // rotateModel(Axis::Y, 90.f, currentFrame);
+    }
+
+    glm::mat4 rotateModel(const glm::vec3 &initialRotationAxis,
+                          float initialRotationAngle,
+                          const glm::vec3 &timeRotationAxis,
+                          float rotationSpeed,
+                          float time)
+    {
+
+        // identity matrix
+        glm::mat4 model = glm::mat4(1.0f);
+
+        model = glm::rotate(model, initialRotationAngle, initialRotationAxis);
+
+        // time-based rotationangle
+        float angle = time * glm::radians(rotationSpeed);
+
+        model = glm::rotate(model, angle, timeRotationAxis);
+
+        return model;
     }
 
     /**
@@ -340,15 +374,12 @@ class TriangleApp {
      * frequently changing values to the shader. A more efficient way to pass a
      * small buffer of data to shaders are push constants. Upcoming !
      * */
-    void updateUniformBuffer(uint32_t currentImage)
+    void updateUniformBuffer(uint32_t currentImage, glm::mat4 modelMatrix)
     {
-        static auto startTime = std::chrono::high_resolution_clock::now();
 
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(
-                         currentTime - startTime)
-                         .count();
-
+        // if time > 1 & using a rotation angle of
+        // * time * glm::radians(degrees) accomplishes the purpose of rotation
+        // * DEGREES degrees per second.
         UniformBufferObject ubo{};
         /**
          * The glm::rotate function takes an existing transformation, rotation
@@ -357,16 +388,18 @@ class TriangleApp {
          * time * glm::radians(degrees) accomplishes the purpose of rotation
          * DEGREES degrees per second.
          * */
-        ubo.model = glm::rotate(glm::mat4(1.0f),
-                                time * glm::radians(10.0f), /// slow: 10° / s
-                                glm::vec3(.0f, .0f, 1.0f));
+        ubo.model = modelMatrix;
+
+        // glm::rotate(glm::mat4(1.0f),
+        //                        time * glm::radians(degrees), /// slow: 10° /
+        //                        s rotateAxisVector);
         /**
          * view transformation: look at the geometry from above at a 45 degree
          * angle. The glm::lookAt function takes the eye position, center
          * position and up axis as parameters.
          * */
-        ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
+        ubo.view = glm::lookAt(glm::vec3(1.8f, 1.8f, 1.8f),
+                               glm::vec3(1.5f, 1.5f, 1.5f),
                                glm::vec3(0.0f, 0.0f, 1.0f));
 
         /**
@@ -1722,7 +1755,8 @@ class TriangleApp {
     {
         int texWidth, texHeight, texChannels;
         stbi_uc *pixels = stbi_load(
-            textureMap.at(Model::VikingRoom).c_str(),
+            textureMap.at(Model::Earth3Dv3).c_str(),
+            // textureMap.at(Model::VikingRoom).c_str(),
             // stbi_uc *pixels =
             // stbi_load(textureMap.at(Model::TestRectangle).c_str(),
             &texWidth,
@@ -1889,7 +1923,8 @@ class TriangleApp {
                                  &materials,
                                  &warn,
                                  &err,
-                                 modelMap.at(Model::VikingRoom).c_str()))
+                                 // modelMap.at(Model::VikingRoom).c_str()))
+                                 modelMap.at(Model::Earth3Dv3).c_str()))
         {
             throw std::runtime_error(warn + err);
         }
@@ -2813,6 +2848,7 @@ class TriangleApp {
     uint32_t currentFrame = 0;
 
     bool framebufferResized = false;
+    bool timedRotation = true;
 
     // vertices and indices for the loaded 3D-model
     std::vector<Vertex> vertices;
