@@ -275,6 +275,37 @@ class TriangleApp {
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     }
 
+    // === ImGui  ===
+    glm::vec3 eyeVec{1.8f, 1.8f, 1.8f};
+    glm::vec3 centerVec{1.5f, 1.5f, 1.5f};
+    glm::vec3 upVec{0.f, 0.f, 1.f};
+
+    void setEyeVector(float x, float y, float z)
+    {
+        eyeVec[0] = x;
+        eyeVec[1] = y;
+        eyeVec[2] = z;
+    }
+
+    void setCenterVector(float x, float y, float z)
+    {
+        centerVec[0] = x;
+        centerVec[1] = y;
+        centerVec[2] = z;
+    }
+
+    void setUpVector(float x, float y, float z)
+    {
+        upVec[0] = x;
+        upVec[1] = y;
+        upVec[2] = z;
+    }
+
+    bool show_demo_window = true;
+    bool show_another_window = false;
+    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    VkResult err;
+
     void drawImGui()
     {
 
@@ -292,61 +323,56 @@ class TriangleApp {
             static float f = 0.0f;
             static int counter = 0;
 
-            ImGui::Begin("Hello, world!"); // Create a window called "Hello,
-                                           // world!" and append into it.
-
-            ImGui::Text(
-                "This is some useful text."); // Display some text (you can
-                                              // use a format strings too)
-            ImGui::Checkbox("Demo Window",
-                            &show_demo_window); // Edit bools storing our window
-                                                // open/close state
-            ImGui::Checkbox("Another Window", &show_another_window);
-
-            ImGui::SliderFloat(
-                "float",
-                &f,
-                0.0f,
-                1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::ColorEdit3(
-                "clear color",
-                (float *)&clear_color); // Edit 3 floats representing a color
-
-            if (ImGui::Button(
-                    "Button")) // Buttons return true when clicked (most widgets
-                               // return true when edited/activated)
-                counter++;
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
-
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
-                        1000.0f / io.Framerate,
-                        io.Framerate);
-            ImGui::End();
-
-            if (show_another_window)
+            ImGui::Begin("SolarSystem 3DV - Preferences");
             {
-                ImGui::Begin(
-                    "Another Window",
-                    &show_another_window); // Pass a pointer to our bool
-                                           // variable (the window will have a
-                                           // closing button that will clear the
-                                           // bool when clicked)
-                ImGui::Text("Hello from another window!");
-                if (ImGui::Button("Close Me"))
-                    show_another_window = false;
-                ImGui::End();
+                if (ImGui::CollapsingHeader("Model - View - Projection"))
+
+                {
+
+                    if (ImGui::TreeNode("View - lookAt"))
+                    {
+                        static float eyeVector[4] = {1.8f, 1.8f, 1.8f, 0.44f};
+                        static float centerVector[4]
+                            = {1.5f, 1.5f, 1.5f, 0.44f};
+                        static float upVector[4] = {0.0f, 0.0f, 1.0f, 0.44f};
+
+                        if (ImGui::SliderFloat3(
+                                "eye (x,y,z)", eyeVector, 0.1f, 4.0f))
+                        {
+                            setEyeVector(
+                                eyeVector[0], eyeVector[1], eyeVector[2]);
+                        }
+                        if (ImGui::SliderFloat3(
+                                "center (x,y,z)", centerVector, 0.1f, 4.0f))
+                        {
+
+                            setCenterVector(centerVector[0],
+                                            centerVector[1],
+                                            centerVector[2]);
+                        }
+
+                        if (ImGui::SliderFloat3(
+                                "up (x,y,z)", upVector, 0.1f, 4.0f))
+                        {
+                            setUpVector(upVector[0], upVector[1], upVector[2]);
+                        }
+                        ImGui::TreePop();
+                    }
+                }
+                ImGui::Checkbox("Demo Window",
+                                &show_demo_window); // Edit bools storing our
+                                                    // window open/close state
+                ImGui::Spacing();
+                ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
+                            1000.0f / io.Framerate,
+                            io.Framerate);
             }
+            ImGui::End();
         }
 
         // last line
         ImGui::Render();
     }
-
-    bool show_demo_window = true;
-    bool show_another_window = false;
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-    VkResult err;
 
     void mainLoop()
     {
@@ -613,6 +639,13 @@ class TriangleApp {
         // time-based rotationangle
         float angle = time * glm::radians(rotationSpeed);
 
+        /**
+         * The glm::rotate function takes an existing transformation, rotation
+         * angle and rotation axis as parameters. The glm::mat4(1.0f)
+         * constructor returns an identity matrix. Using a rotation angle of
+         * time * glm::radians(degrees) accomplishes the purpose of rotation
+         * DEGREES degrees per second.
+         * */
         model = glm::rotate(model, angle, timeRotationAxis);
 
         return model;
@@ -631,13 +664,6 @@ class TriangleApp {
         // * time * glm::radians(degrees) accomplishes the purpose of rotation
         // * DEGREES degrees per second.
         UniformBufferObject ubo{};
-        /**
-         * The glm::rotate function takes an existing transformation, rotation
-         * angle and rotation axis as parameters. The glm::mat4(1.0f)
-         * constructor returns an identity matrix. Using a rotation angle of
-         * time * glm::radians(degrees) accomplishes the purpose of rotation
-         * DEGREES degrees per second.
-         * */
         ubo.model = modelMatrix;
 
         // glm::rotate(glm::mat4(1.0f),
@@ -648,9 +674,10 @@ class TriangleApp {
          * angle. The glm::lookAt function takes the eye position, center
          * position and up axis as parameters.
          * */
-        ubo.view = glm::lookAt(glm::vec3(1.8f, 1.8f, 1.8f),
-                               glm::vec3(1.5f, 1.5f, 1.5f),
-                               glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = glm::lookAt(eyeVec, centerVec, upVec);
+        // glm::vec3(1.8f, 1.8f, 1.8f),
+        // glm::vec3(1.5f, 1.5f, 1.5f),
+        // glm::vec3(0.0f, 0.0f, 1.0f));
 
         /**
          * Perspective projection with a 45 degree vertical field-of-view. The
