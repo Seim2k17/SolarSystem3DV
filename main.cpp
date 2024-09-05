@@ -198,44 +198,6 @@ class TriangleApp {
         createSyncObjects();
     }
 
-    void initImGui()
-    {
-        // Setup Dear ImGui context
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGuiIO &io = ImGui::GetIO();
-        io.ConfigFlags
-            |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-        io.ConfigFlags
-            |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
-        // io.ConfigFlags
-        //    |= ImGuiConfigFlags_DockingEnable; // IF using Docking Branch
-
-        // Setup Dear ImGui style
-        ImGui::StyleColorsDark();
-
-        ImGui_ImplGlfw_InitForVulkan(
-            window, true); // Second param install_callback=true will install
-                           // GLFW callbacks and chain to existing ones.
-
-        ImGui_ImplVulkan_InitInfo init_info = {};
-        init_info.Instance = instance;
-        init_info.PhysicalDevice = physicalDevice;
-        init_info.Device = device;
-        init_info.QueueFamily = graphicsQueueFamily;
-        init_info.Queue = graphicsQueue;
-        init_info.PipelineCache = VK_NULL_HANDLE;
-        init_info.DescriptorPool = descriptorPool;
-        init_info.RenderPass = renderPass;
-        init_info.Subpass = 0;
-        init_info.MinImageCount = 2;
-        init_info.ImageCount = MAX_FRAMES_IN_FLIGHT;
-        init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-        init_info.Allocator = nullptr;
-        init_info.CheckVkResultFn = check_vk_result;
-        ImGui_ImplVulkan_Init(&init_info);
-    }
-
     VkCommandBuffer BeginSingleTimeCommands(VkDevice device,
                                             VkCommandPool commandPool)
     {
@@ -279,6 +241,12 @@ class TriangleApp {
     glm::vec3 eyeVec{1.8f, 1.8f, 1.8f};
     glm::vec3 centerVec{1.5f, 1.5f, 1.5f};
     glm::vec3 upVec{0.f, 0.f, 1.f};
+    glm::vec3 initialRotationAxis{1.0f, 0.0f, 0.0f};
+    float initialRotationDegrees{90.0f};
+    glm::vec3 rotationAxis{0.0f, 1.0f, 0.0f};
+    float lastRotationSpeed{7.5f};
+    float rotationSpeed{7.5f};
+    bool isRotating{true};
 
     void setEyeVector(float x, float y, float z)
     {
@@ -301,7 +269,26 @@ class TriangleApp {
         upVec[2] = z;
     }
 
-    bool show_demo_window = true;
+    void toggleRotation()
+    {
+        if (isRotating)
+        {
+            isRotating = false;
+            lastRotationSpeed = rotationSpeed;
+            rotationSpeed = 1.0f;
+        } else
+        {
+            isRotating = true;
+            rotationSpeed = lastRotationSpeed;
+        }
+    }
+
+    void setRotationAxis(bool axisPressed[3])
+    {
+        rotationAxis = {axisPressed[0], axisPressed[1], axisPressed[2]};
+    }
+
+    bool show_demo_window = false;
     bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
     VkResult err;
@@ -328,13 +315,62 @@ class TriangleApp {
                 if (ImGui::CollapsingHeader("Model - View - Projection"))
 
                 {
+                    if (ImGui::TreeNode("Model - rotation"))
+                    {
+                        static bool isRotating = true;
+                        static float initialRotationDegrees = {90.0f};
+                        static float initialRotationSpeed = {7.5f};
+                        ImGui::Text("Initial rotation");
+                        if (ImGui::Checkbox("rotate", &isRotating))
+                        {
+                            toggleRotation();
+                        }
+                        ImGui::SameLine();
+                        static bool axisPressed[3] = {false, true, false};
+                        if (ImGui::Checkbox("x", &axisPressed[0]))
+                        {
+                            setRotationAxis(axisPressed);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("y", &axisPressed[1]))
+                        {
+                            setRotationAxis(axisPressed);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("z", &axisPressed[2]))
+                        {
+                            setRotationAxis(axisPressed);
+                        }
+                        /*
+                        if (ImGui::BeginTable("table1", 3))
+                        {
+                            for(int col = 0; col < 2; col++)
+                            {
+
+                            }
+
+                        }
+                        ImGuiInputFlags flags;
+                        */
+                        ImGui::SetNextItemWidth(80.0f);
+                        if (ImGui::InputFloat("Degrees",
+                                              &initialRotationDegrees))
+                        {
+                        }
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(80.0f);
+                        if (ImGui::InputFloat("Speed", &initialRotationSpeed))
+                        {
+                        }
+                        ImGui::TreePop();
+                    }
 
                     if (ImGui::TreeNode("View - lookAt"))
                     {
                         static float eyeVector[4] = {1.8f, 1.8f, 1.8f, 0.44f};
                         static float centerVector[4]
                             = {1.5f, 1.5f, 1.5f, 0.44f};
-                        static float upVector[4] = {0.0f, 0.0f, 1.0f, 0.44f};
+                        static bool upVector[3] = {false, false, true};
 
                         if (ImGui::SliderFloat3(
                                 "eye (x,y,z)", eyeVector, 0.1f, 4.0f))
@@ -350,11 +386,30 @@ class TriangleApp {
                                             centerVector[1],
                                             centerVector[2]);
                         }
-
-                        if (ImGui::SliderFloat3(
-                                "up (x,y,z)", upVector, 0.1f, 4.0f))
+                        ImGui::Text("upvector: ");
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("x", &upVector[0]))
                         {
-                            setUpVector(upVector[0], upVector[1], upVector[2]);
+                            upVector[0] = true;
+                            upVector[1] = false;
+                            upVector[2] = false;
+                            setUpVector(1.0f, 0.0f, 0.0f);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("y", &upVector[1]))
+                        {
+                            upVector[0] = false;
+                            upVector[1] = true;
+                            upVector[2] = false;
+                            setUpVector(0.0f, 1.0f, 0.0f);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("z", &upVector[2]))
+                        {
+                            upVector[0] = false;
+                            upVector[1] = false;
+                            upVector[2] = true;
+                            setUpVector(0.0f, 0.0f, 1.0f);
                         }
                         ImGui::TreePop();
                     }
@@ -374,7 +429,7 @@ class TriangleApp {
         ImGui::Render();
     }
 
-    void mainLoop()
+    void initImGui()
     {
         // Setup Dear ImGui context
         IMGUI_CHECKVERSION();
@@ -412,7 +467,7 @@ class TriangleApp {
         ImGui_ImplVulkan_Init(&init_info);
 
         // FIXME: probably the same command buffer like for the normal
-        // renderstuff
+        // renderstuff this section is probably not needable
         VkCommandBuffer command_buffer = BeginSingleTimeCommands(
             device, commandPool); // Helper function to begin command buffer
         ImGui_ImplVulkan_CreateFontsTexture(); // command_buffer);
@@ -424,45 +479,32 @@ class TriangleApp {
             command_buffer); // Helper function to end command buffer
         // ImGui_ImplVulkan_DestroyFontUploadObjects();
         ImGui_ImplVulkan_DestroyFontsTexture();
+    }
+
+    void destroyImGui()
+    {
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+    }
+
+    void mainLoop()
+    {
+        initImGui();
 
         while (not glfwWindowShouldClose(window))
         {
             glfwPollEvents();
-            // drawFrame();
-            // Start the Dear ImGui frame
-            /*if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0)
-            {
-                ImGui_ImplGlfw_Sleep(10);
-                continue;
-            }*/
-            /*
-                    const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f
-               || draw_data->DisplaySize.y <= 0.0f);
-
-                    if (!is_minimized)
-                    {
-                        wd->ClearValue.color.float32[0] = clear_color.x *
-               clear_color.w; wd->ClearValue.color.float32[1] = clear_color.y *
-               clear_color.w; wd->ClearValue.color.float32[2] = clear_color.z *
-               clear_color.w; wd->ClearValue.color.float32[3] = clear_color.w;
-                        FrameRender(wd, draw_data);
-                        FramePresent(wd);
-                    }
-                    */
             drawFrame();
-            // drawImGui(commandBuffer);
-            // advance to the next frame
-            // ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
 
         // as all operations are async in drawFrame() & when exiting the
         // mainLoop, drawing amy still be going on, cleaning things up while
         // drawing is a bad idea
         err = vkDeviceWaitIdle(device);
+
         check_vk_result(err);
-        ImGui_ImplVulkan_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImGui::DestroyContext();
+        destroyImGui();
     }
 
     /**
@@ -531,16 +573,34 @@ class TriangleApp {
         }
 
         static auto startTime = std::chrono::high_resolution_clock::now();
+        float time;
+        static std::chrono::time_point<std::chrono::high_resolution_clock>
+            currentTime;
+        static bool stopped = false;
 
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(
-                         currentTime - startTime)
-                         .count();
+        if (isRotating)
+        {
+            if (stopped)
+            {
+                startTime = std::chrono::high_resolution_clock::now();
+                stopped = false;
+            }
+            currentTime = std::chrono::high_resolution_clock::now();
+            time = std::chrono::duration<float, std::chrono::seconds::period>(
+                       currentTime - startTime)
+                       .count();
+        } else
+        {
+            if (not stopped)
+            {
+                stopped = true;
+            }
+        }
 
-        glm::mat4 finalModelMatrix = rotateModel(glm::vec3(1.0f, .0f, 1.0f),
-                                                 90.0f,
-                                                 glm::vec3(0.f, 1.f, .0f),
-                                                 7.5f,
+        glm::mat4 finalModelMatrix = rotateModel(initialRotationAxis,
+                                                 initialRotationDegrees,
+                                                 rotationAxis,
+                                                 rotationSpeed,
                                                  time);
 
         updateUniformBuffer(currentFrame, finalModelMatrix);
@@ -636,8 +696,22 @@ class TriangleApp {
 
         model = glm::rotate(model, initialRotationAngle, initialRotationAxis);
 
+        // if time > 1 & using a rotation angle of
+        // * time * glm::radians(degrees) accomplishes the purpose of rotation
+        // * DEGREES degrees per second.
         // time-based rotationangle
-        float angle = time * glm::radians(rotationSpeed);
+        float angle;
+        static float lastAngle;
+        static float lastTime; // FIXME: how to pause the timer and when
+                               // resuming continue from there
+        if (isRotating)
+        {
+            angle = time * glm::radians(rotationSpeed);
+            lastAngle = angle;
+        } else
+        {
+            angle = lastAngle;
+        }
 
         /**
          * The glm::rotate function takes an existing transformation, rotation
@@ -660,24 +734,15 @@ class TriangleApp {
     void updateUniformBuffer(uint32_t currentImage, glm::mat4 modelMatrix)
     {
 
-        // if time > 1 & using a rotation angle of
-        // * time * glm::radians(degrees) accomplishes the purpose of rotation
-        // * DEGREES degrees per second.
         UniformBufferObject ubo{};
         ubo.model = modelMatrix;
 
-        // glm::rotate(glm::mat4(1.0f),
-        //                        time * glm::radians(degrees), /// slow: 10° /
-        //                        s rotateAxisVector);
         /**
          * view transformation: look at the geometry from above at a 45 degree
          * angle. The glm::lookAt function takes the eye position, center
          * position and up axis as parameters.
          * */
         ubo.view = glm::lookAt(eyeVec, centerVec, upVec);
-        // glm::vec3(1.8f, 1.8f, 1.8f),
-        // glm::vec3(1.5f, 1.5f, 1.5f),
-        // glm::vec3(0.0f, 0.0f, 1.0f));
 
         /**
          * Perspective projection with a 45 degree vertical field-of-view. The
