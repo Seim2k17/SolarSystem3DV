@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+// #include <format> only available in C++20 with gcc>11
 #include <fstream>
 #include <ios>
 #include <iostream>
@@ -63,6 +64,11 @@ check_vk_result(VkResult err)
         abort();
     }
 }
+static float rotatingTime = 0.0f;
+static std::chrono::time_point<std::chrono::high_resolution_clock> startTime
+    = std::chrono::high_resolution_clock::now();
+static std::chrono::time_point<std::chrono::high_resolution_clock> stoppedTime;
+static bool stopped = false;
 
 class TriangleApp {
   public:
@@ -242,11 +248,14 @@ class TriangleApp {
     glm::vec3 centerVec{1.5f, 1.5f, 1.5f};
     glm::vec3 upVec{0.f, 0.f, 1.f};
     glm::vec3 initialRotationAxis{1.0f, 0.0f, 0.0f};
-    float initialRotationDegrees{90.0f};
+    float m_initialRotationDegrees{90.0f};
     glm::vec3 rotationAxis{0.0f, 1.0f, 0.0f};
     float lastRotationSpeed{7.5f};
-    float rotationSpeed{7.5f};
+    float m_rotationSpeed{7.5f};
     bool isRotating{true};
+    float m_fieldOfView{45.0f};
+    float m_zNear{0.1f};
+    float m_zFar{10.0f};
 
     void setEyeVector(float x, float y, float z)
     {
@@ -274,12 +283,12 @@ class TriangleApp {
         if (isRotating)
         {
             isRotating = false;
-            lastRotationSpeed = rotationSpeed;
-            rotationSpeed = 1.0f;
+            lastRotationSpeed = m_rotationSpeed;
+            m_rotationSpeed = 1.0f;
         } else
         {
             isRotating = true;
-            rotationSpeed = lastRotationSpeed;
+            m_rotationSpeed = lastRotationSpeed;
         }
     }
 
@@ -288,12 +297,26 @@ class TriangleApp {
         rotationAxis = {axisPressed[0], axisPressed[1], axisPressed[2]};
     }
 
+    void setInitialRotation(float initRotationDegrees)
+    {
+        m_initialRotationDegrees = initRotationDegrees;
+    }
+
+    void setInitialRotationSpeed(float speed) { m_rotationSpeed = speed; }
+
+    void setFielOfView(float fieldOfView) { m_fieldOfView = fieldOfView; }
+
+    void setZNear(float zNear) { m_zNear = zNear; }
+
+    void setZFar(float zFar) { m_zFar = zFar; }
+
     bool show_demo_window = false;
     bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
     VkResult err;
 
-    void drawImGui()
+    void drawImGui(
+        std::chrono::time_point<std::chrono::high_resolution_clock> startTime)
     {
 
         ImGui_ImplVulkan_NewFrame();
@@ -315,7 +338,7 @@ class TriangleApp {
                 if (ImGui::CollapsingHeader("Model - View - Projection"))
 
                 {
-                    if (ImGui::TreeNode("Model - rotation"))
+                    if (ImGui::TreeNode("Model - (rotation)"))
                     {
                         static bool isRotating = true;
                         static float initialRotationDegrees = {90.0f};
@@ -341,31 +364,25 @@ class TriangleApp {
                         {
                             setRotationAxis(axisPressed);
                         }
-                        /*
-                        if (ImGui::BeginTable("table1", 3))
-                        {
-                            for(int col = 0; col < 2; col++)
-                            {
-
-                            }
-
-                        }
-                        ImGuiInputFlags flags;
-                        */
                         ImGui::SetNextItemWidth(80.0f);
-                        if (ImGui::InputFloat("Degrees",
-                                              &initialRotationDegrees))
+                        if (ImGui::SliderFloat("Degrees",
+                                               &initialRotationDegrees,
+                                               0.0f,
+                                               360.0f))
                         {
+                            setInitialRotation(initialRotationDegrees);
                         }
                         ImGui::SameLine();
                         ImGui::SetNextItemWidth(80.0f);
-                        if (ImGui::InputFloat("Speed", &initialRotationSpeed))
+                        if (ImGui::SliderFloat(
+                                "Speed", &initialRotationSpeed, 0.0f, 100.0f))
                         {
+                            setInitialRotationSpeed(initialRotationSpeed);
                         }
                         ImGui::TreePop();
                     }
 
-                    if (ImGui::TreeNode("View - lookAt"))
+                    if (ImGui::TreeNode("View - (lookAt)"))
                     {
                         static float eyeVector[4] = {1.8f, 1.8f, 1.8f, 0.44f};
                         static float centerVector[4]
@@ -413,6 +430,28 @@ class TriangleApp {
                         }
                         ImGui::TreePop();
                     }
+
+                    if (ImGui::TreeNode("Projection - (perspective)"))
+                    {
+                        static float foV{45.0f};
+                        static float zNear{0.1f};
+                        static float zFar{10.0f};
+
+                        if (ImGui::SliderFloat(
+                                "Fiel of view ", &foV, 0.1f, 360.0f))
+                        {
+                            setFielOfView(foV);
+                        }
+                        if (ImGui::SliderFloat("zNear", &zNear, 0.1f, zFar))
+                        {
+                            setZNear(zNear);
+                        }
+                        if (ImGui::SliderFloat("zFar", &zFar, 10.0f, 35.0f))
+                        {
+                            setZFar(zFar);
+                        }
+                        ImGui::TreePop();
+                    }
                 }
                 ImGui::Checkbox("Demo Window",
                                 &show_demo_window); // Edit bools storing our
@@ -421,6 +460,8 @@ class TriangleApp {
                 ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
                             1000.0f / io.Framerate,
                             io.Framerate);
+                ImGui::Text("StartTime rotating earth: %s ",
+                            time_point_to_string(startTime).c_str());
             }
             ImGui::End();
         }
@@ -517,7 +558,8 @@ class TriangleApp {
      * */
     void drawFrame()
     {
-        drawImGui();
+        // static auto startTime = std::chrono::high_resolution_clock::now();
+        drawImGui(startTime);
 
         // synchronization of execution on the GPU is explicit
         // the order of operations is up to us
@@ -572,36 +614,38 @@ class TriangleApp {
             throw std::runtime_error("failed to aquire swap chain image!");
         }
 
-        static auto startTime = std::chrono::high_resolution_clock::now();
-        float time;
-        static std::chrono::time_point<std::chrono::high_resolution_clock>
-            currentTime;
-        static bool stopped = false;
-
         if (isRotating)
         {
             if (stopped)
             {
-                startTime = std::chrono::high_resolution_clock::now();
+                // If we were previously stopped, calculate the accumulated time
+                auto resumeTime = std::chrono::high_resolution_clock::now();
+                auto accumulatedDuration = resumeTime - stoppedTime;
+                rotatingTime
+                    += std::chrono::duration<float>(accumulatedDuration)
+                           .count();
                 stopped = false;
             }
-            currentTime = std::chrono::high_resolution_clock::now();
-            time = std::chrono::duration<float, std::chrono::seconds::period>(
-                       currentTime - startTime)
-                       .count();
+
+            // Update the current time and calculate the new time
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            rotatingTime
+                = std::chrono::duration<float>(currentTime - startTime).count();
         } else
         {
-            if (not stopped)
+            if (!stopped)
             {
+                // Record the time when rotation is stopped
+                stoppedTime = std::chrono::high_resolution_clock::now();
                 stopped = true;
             }
         }
 
         glm::mat4 finalModelMatrix = rotateModel(initialRotationAxis,
-                                                 initialRotationDegrees,
+                                                 m_initialRotationDegrees,
                                                  rotationAxis,
-                                                 rotationSpeed,
-                                                 time);
+                                                 m_rotationSpeed,
+                                                 rotatingTime);
 
         updateUniformBuffer(currentFrame, finalModelMatrix);
 
@@ -702,11 +746,13 @@ class TriangleApp {
         // time-based rotationangle
         float angle;
         static float lastAngle;
-        static float lastTime; // FIXME: how to pause the timer and when
-                               // resuming continue from there
+        static float
+            lastTime; // FIXME: how to pause the timer and when
+                      // resuming continue from there, there are some overwrites
+                      // or st. rotationpause / continue does not work correctly
+        angle = time * glm::radians(rotationSpeed);
         if (isRotating)
         {
-            angle = time * glm::radians(rotationSpeed);
             lastAngle = angle;
         } else
         {
@@ -751,11 +797,11 @@ class TriangleApp {
          * aspect ratio to take into account the new width and height of the
          * window after a resize.
          * */
-        ubo.proj = glm::perspective(glm::radians(45.0f),
+        ubo.proj = glm::perspective(glm::radians(m_fieldOfView),
                                     swapChainExtent.width
                                         / (float)swapChainExtent.height,
-                                    0.1f,
-                                    10.0f);
+                                    m_zNear,
+                                    m_zFar);
         // GLM was originally designed for OpenGL, where the Y coordinate of the
         // clip coordinates is inverted. The easiest way to compensate for that
         // is to flip the sign on the scaling factor of the Y axis in the

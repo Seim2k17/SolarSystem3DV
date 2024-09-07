@@ -13,8 +13,8 @@ project(VulkanTutorial1 VERSION 1.0
 
 set(MAIN "main.cpp")
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake/;${CMAKE_MODULE_PATH}")
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_COMPILER "gcc")
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_COMPILER "g++")
 set(INCLUDE_THIRDPARTY_FOLDER "includeLibs/")
 set(INCLUDE_IMGUI_FOLDER "imgui/")
 find_package(fmt REQUIRED)
@@ -35,6 +35,8 @@ target_link_libraries(vulkanTut PRIVATE
   glfw
   vulkan
   dl
+  #mvec
+  #m
   pthread
   X11
   Xxf86vm
