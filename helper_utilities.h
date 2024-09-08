@@ -1,7 +1,10 @@
 #pragma once
 
+#include <chrono>
 #include <fstream>
+#include <iomanip> // std::put_time
 #include <iostream>
+#include <sstream> // stringstream
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -65,4 +68,22 @@ readFile(const std::string &filename)
     file.close();
 
     return buffer;
+}
+
+std::string
+time_point_to_string(
+    const std::chrono::time_point<std::chrono::high_resolution_clock> &tp)
+{
+    // Convert the time_point to a time_t (system time)
+    auto now_time_t = std::chrono::system_clock::to_time_t(
+        std::chrono::time_point_cast<std::chrono::seconds>(tp));
+
+    // Convert the time_t to a tm struct for formatting
+    std::tm now_tm = *std::localtime(&now_time_t);
+
+    // Format the time into a string
+    std::stringstream ss;
+    ss << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S");
+
+    return ss.str();
 }

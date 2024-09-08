@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+// #include <format> only available in C++20 with gcc>11
 #include <fstream>
 #include <ios>
 #include <iostream>
@@ -27,6 +28,10 @@
 
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
+
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_glfw.h"
+#include "imgui/imgui_impl_vulkan.h"
 
 #include <GLFW/glfw3native.h>
 
@@ -45,12 +50,33 @@
 #include <glm/glm.hpp> // linear algebra types
 #include <glm/gtc/matrix_transform.hpp>
 
+static void
+check_vk_result(VkResult err)
+{
+    if (err == 0)
+    {
+        return;
+    }
+    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+
+    if (err < 0)
+    {
+        abort();
+    }
+}
+static float rotatingTime = 0.0f;
+static std::chrono::time_point<std::chrono::high_resolution_clock> startTime
+    = std::chrono::high_resolution_clock::now();
+static std::chrono::time_point<std::chrono::high_resolution_clock> stoppedTime;
+static bool stopped = false;
+
 class TriangleApp {
   public:
     void run()
     {
         initWindow();
         initVulkan();
+        // initImGui();
         mainLoop();
         cleanup();
     }
@@ -178,8 +204,335 @@ class TriangleApp {
         createSyncObjects();
     }
 
+    VkCommandBuffer BeginSingleTimeCommands(VkDevice device,
+                                            VkCommandPool commandPool)
+    {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = commandPool;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        return commandBuffer;
+    }
+
+    void EndSingleTimeCommands(VkDevice device,
+                               VkCommandPool commandPool,
+                               VkQueue graphicsQueue,
+                               VkCommandBuffer commandBuffer)
+    {
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(graphicsQueue);
+
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    }
+
+    // === ImGui  ===
+    glm::vec3 eyeVec{1.8f, 1.8f, 1.8f};
+    glm::vec3 centerVec{1.5f, 1.5f, 1.5f};
+    glm::vec3 upVec{0.f, 0.f, 1.f};
+    glm::vec3 initialRotationAxis{1.0f, 0.0f, 0.0f};
+    float m_initialRotationDegrees{90.0f};
+    glm::vec3 rotationAxis{0.0f, 1.0f, 0.0f};
+    float lastRotationSpeed{7.5f};
+    float m_rotationSpeed{7.5f};
+    bool isRotating{true};
+    float m_fieldOfView{45.0f};
+    float m_zNear{0.1f};
+    float m_zFar{10.0f};
+
+    void setEyeVector(float x, float y, float z)
+    {
+        eyeVec[0] = x;
+        eyeVec[1] = y;
+        eyeVec[2] = z;
+    }
+
+    void setCenterVector(float x, float y, float z)
+    {
+        centerVec[0] = x;
+        centerVec[1] = y;
+        centerVec[2] = z;
+    }
+
+    void setUpVector(float x, float y, float z)
+    {
+        upVec[0] = x;
+        upVec[1] = y;
+        upVec[2] = z;
+    }
+
+    void toggleRotation()
+    {
+        if (isRotating)
+        {
+            isRotating = false;
+            lastRotationSpeed = m_rotationSpeed;
+            m_rotationSpeed = 1.0f;
+        } else
+        {
+            isRotating = true;
+            m_rotationSpeed = lastRotationSpeed;
+        }
+    }
+
+    void setRotationAxis(bool axisPressed[3])
+    {
+        rotationAxis = {axisPressed[0], axisPressed[1], axisPressed[2]};
+    }
+
+    void setInitialRotation(float initRotationDegrees)
+    {
+        m_initialRotationDegrees = initRotationDegrees;
+    }
+
+    void setInitialRotationSpeed(float speed) { m_rotationSpeed = speed; }
+
+    void setFielOfView(float fieldOfView) { m_fieldOfView = fieldOfView; }
+
+    void setZNear(float zNear) { m_zNear = zNear; }
+
+    void setZFar(float zFar) { m_zFar = zFar; }
+
+    bool show_demo_window = false;
+    bool show_another_window = false;
+    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    VkResult err;
+
+    void drawImGui(
+        std::chrono::time_point<std::chrono::high_resolution_clock> startTime)
+    {
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (show_demo_window)
+        {
+            ImGui::ShowDemoWindow(); // Show demo window! :)
+        }                            // 3. Show another simple window.
+
+        {
+            ImGuiIO &io = ImGui::GetIO();
+            static float f = 0.0f;
+            static int counter = 0;
+
+            ImGui::Begin("SolarSystem 3DV - Preferences");
+            {
+                if (ImGui::CollapsingHeader("Model - View - Projection"))
+
+                {
+                    if (ImGui::TreeNode("Model - (rotation)"))
+                    {
+                        static bool isRotating = true;
+                        static float initialRotationDegrees = {90.0f};
+                        static float initialRotationSpeed = {7.5f};
+                        ImGui::Text("Initial rotation");
+                        if (ImGui::Checkbox("rotate", &isRotating))
+                        {
+                            toggleRotation();
+                        }
+                        ImGui::SameLine();
+                        static bool axisPressed[3] = {false, true, false};
+                        if (ImGui::Checkbox("x", &axisPressed[0]))
+                        {
+                            setRotationAxis(axisPressed);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("y", &axisPressed[1]))
+                        {
+                            setRotationAxis(axisPressed);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("z", &axisPressed[2]))
+                        {
+                            setRotationAxis(axisPressed);
+                        }
+                        ImGui::SetNextItemWidth(80.0f);
+                        if (ImGui::SliderFloat("Degrees",
+                                               &initialRotationDegrees,
+                                               0.0f,
+                                               360.0f))
+                        {
+                            setInitialRotation(initialRotationDegrees);
+                        }
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(80.0f);
+                        if (ImGui::SliderFloat(
+                                "Speed", &initialRotationSpeed, 0.0f, 100.0f))
+                        {
+                            setInitialRotationSpeed(initialRotationSpeed);
+                        }
+                        ImGui::TreePop();
+                    }
+
+                    if (ImGui::TreeNode("View - (lookAt)"))
+                    {
+                        static float eyeVector[4] = {1.8f, 1.8f, 1.8f, 0.44f};
+                        static float centerVector[4]
+                            = {1.5f, 1.5f, 1.5f, 0.44f};
+                        static bool upVector[3] = {false, false, true};
+
+                        if (ImGui::SliderFloat3(
+                                "eye (x,y,z)", eyeVector, 0.1f, 4.0f))
+                        {
+                            setEyeVector(
+                                eyeVector[0], eyeVector[1], eyeVector[2]);
+                        }
+                        if (ImGui::SliderFloat3(
+                                "center (x,y,z)", centerVector, 0.1f, 4.0f))
+                        {
+
+                            setCenterVector(centerVector[0],
+                                            centerVector[1],
+                                            centerVector[2]);
+                        }
+                        ImGui::Text("upvector: ");
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("x", &upVector[0]))
+                        {
+                            upVector[0] = true;
+                            upVector[1] = false;
+                            upVector[2] = false;
+                            setUpVector(1.0f, 0.0f, 0.0f);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("y", &upVector[1]))
+                        {
+                            upVector[0] = false;
+                            upVector[1] = true;
+                            upVector[2] = false;
+                            setUpVector(0.0f, 1.0f, 0.0f);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Checkbox("z", &upVector[2]))
+                        {
+                            upVector[0] = false;
+                            upVector[1] = false;
+                            upVector[2] = true;
+                            setUpVector(0.0f, 0.0f, 1.0f);
+                        }
+                        ImGui::TreePop();
+                    }
+
+                    if (ImGui::TreeNode("Projection - (perspective)"))
+                    {
+                        static float foV{45.0f};
+                        static float zNear{0.1f};
+                        static float zFar{10.0f};
+
+                        if (ImGui::SliderFloat(
+                                "Fiel of view ", &foV, 0.1f, 360.0f))
+                        {
+                            setFielOfView(foV);
+                        }
+                        if (ImGui::SliderFloat("zNear", &zNear, 0.1f, zFar))
+                        {
+                            setZNear(zNear);
+                        }
+                        if (ImGui::SliderFloat("zFar", &zFar, 10.0f, 35.0f))
+                        {
+                            setZFar(zFar);
+                        }
+                        ImGui::TreePop();
+                    }
+                }
+                ImGui::Checkbox("Demo Window",
+                                &show_demo_window); // Edit bools storing our
+                                                    // window open/close state
+                ImGui::Spacing();
+                ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
+                            1000.0f / io.Framerate,
+                            io.Framerate);
+                ImGui::Text("StartTime rotating earth: %s ",
+                            time_point_to_string(startTime).c_str());
+            }
+            ImGui::End();
+        }
+
+        // last line
+        ImGui::Render();
+    }
+
+    void initImGui()
+    {
+        // Setup Dear ImGui context
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO &io = ImGui::GetIO();
+        io.ConfigFlags
+            |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+        io.ConfigFlags
+            |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+        // io.ConfigFlags
+        //    |= ImGuiConfigFlags_DockingEnable; // IF using Docking Branch
+
+        // Setup Dear ImGui style
+        ImGui::StyleColorsDark();
+
+        ImGui_ImplGlfw_InitForVulkan(
+            window, true); // Second param install_callback=true will install
+                           // GLFW callbacks and chain to existing ones.
+
+        ImGui_ImplVulkan_InitInfo init_info = {};
+        init_info.Instance = instance;
+        init_info.PhysicalDevice = physicalDevice;
+        init_info.Device = device;
+        init_info.QueueFamily = graphicsQueueFamily;
+        init_info.Queue = graphicsQueue;
+        init_info.PipelineCache = VK_NULL_HANDLE;
+        init_info.DescriptorPool = descriptorPool;
+        init_info.RenderPass = renderPass;
+        init_info.Subpass = 0;
+        init_info.MinImageCount = 2;
+        init_info.ImageCount = MAX_FRAMES_IN_FLIGHT;
+        init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        init_info.Allocator = nullptr;
+        init_info.CheckVkResultFn = check_vk_result;
+        ImGui_ImplVulkan_Init(&init_info);
+
+        // FIXME: probably the same command buffer like for the normal
+        // renderstuff this section is probably not needable
+        VkCommandBuffer command_buffer = BeginSingleTimeCommands(
+            device, commandPool); // Helper function to begin command buffer
+        ImGui_ImplVulkan_CreateFontsTexture(); // command_buffer);
+        EndSingleTimeCommands(
+
+            device,
+            commandPool,
+            graphicsQueue,
+            command_buffer); // Helper function to end command buffer
+        // ImGui_ImplVulkan_DestroyFontUploadObjects();
+        ImGui_ImplVulkan_DestroyFontsTexture();
+    }
+
+    void destroyImGui()
+    {
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+    }
+
     void mainLoop()
     {
+        initImGui();
+
         while (not glfwWindowShouldClose(window))
         {
             glfwPollEvents();
@@ -189,7 +542,10 @@ class TriangleApp {
         // as all operations are async in drawFrame() & when exiting the
         // mainLoop, drawing amy still be going on, cleaning things up while
         // drawing is a bad idea
-        vkDeviceWaitIdle(device);
+        err = vkDeviceWaitIdle(device);
+
+        check_vk_result(err);
+        destroyImGui();
     }
 
     /**
@@ -202,6 +558,9 @@ class TriangleApp {
      * */
     void drawFrame()
     {
+        // static auto startTime = std::chrono::high_resolution_clock::now();
+        drawImGui(startTime);
+
         // synchronization of execution on the GPU is explicit
         // the order of operations is up to us
         // many Vulkan API calls are asychronous
@@ -255,7 +614,40 @@ class TriangleApp {
             throw std::runtime_error("failed to aquire swap chain image!");
         }
 
-        updateUniformBuffer(currentFrame);
+        if (isRotating)
+        {
+            if (stopped)
+            {
+                // If we were previously stopped, calculate the accumulated time
+                auto resumeTime = std::chrono::high_resolution_clock::now();
+                auto accumulatedDuration = resumeTime - stoppedTime;
+                rotatingTime
+                    += std::chrono::duration<float>(accumulatedDuration)
+                           .count();
+                stopped = false;
+            }
+
+            // Update the current time and calculate the new time
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            rotatingTime
+                = std::chrono::duration<float>(currentTime - startTime).count();
+        } else
+        {
+            if (!stopped)
+            {
+                // Record the time when rotation is stopped
+                stoppedTime = std::chrono::high_resolution_clock::now();
+                stopped = true;
+            }
+        }
+
+        glm::mat4 finalModelMatrix = rotateModel(initialRotationAxis,
+                                                 m_initialRotationDegrees,
+                                                 rotationAxis,
+                                                 m_rotationSpeed,
+                                                 rotatingTime);
+
+        updateUniformBuffer(currentFrame, finalModelMatrix);
 
         // only reset the fence if we are submitting work
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
@@ -325,13 +717,58 @@ class TriangleApp {
         {
             throw std::runtime_error("failed to present swap chain image!");
         }
-        // advance to the next frame
+        // advance to next frame here (before ImGui integration)
         currentFrame
             = (currentFrame + 1)
-              % MAX_FRAMES_IN_FLIGHT; /// By using the modulo (%) operator, we
-                                      /// ensure that the frame index loops
-                                      /// around after every
-                                      /// MAX_FRAMES_IN_FLIGHT enqueued frames.
+              % MAX_FRAMES_IN_FLIGHT; /// By using the modulo (%) operator,
+                                      /// we ensure that the frame index
+                                      /// loops around after every
+                                      /// MAX_FRAMES_IN_FLIGHT enqueued
+                                      /// frames.
+        // rotateModel(Axis::Y, 90.f, currentFrame);
+    }
+
+    glm::mat4 rotateModel(const glm::vec3 &initialRotationAxis,
+                          float initialRotationAngle,
+                          const glm::vec3 &timeRotationAxis,
+                          float rotationSpeed,
+                          float time)
+    {
+
+        // identity matrix
+        glm::mat4 model = glm::mat4(1.0f);
+
+        model = glm::rotate(model, initialRotationAngle, initialRotationAxis);
+
+        // if time > 1 & using a rotation angle of
+        // * time * glm::radians(degrees) accomplishes the purpose of rotation
+        // * DEGREES degrees per second.
+        // time-based rotationangle
+        float angle;
+        static float lastAngle;
+        static float
+            lastTime; // FIXME: how to pause the timer and when
+                      // resuming continue from there, there are some overwrites
+                      // or st. rotationpause / continue does not work correctly
+        angle = time * glm::radians(rotationSpeed);
+        if (isRotating)
+        {
+            lastAngle = angle;
+        } else
+        {
+            angle = lastAngle;
+        }
+
+        /**
+         * The glm::rotate function takes an existing transformation, rotation
+         * angle and rotation axis as parameters. The glm::mat4(1.0f)
+         * constructor returns an identity matrix. Using a rotation angle of
+         * time * glm::radians(degrees) accomplishes the purpose of rotation
+         * DEGREES degrees per second.
+         * */
+        model = glm::rotate(model, angle, timeRotationAxis);
+
+        return model;
     }
 
     /**
@@ -340,34 +777,18 @@ class TriangleApp {
      * frequently changing values to the shader. A more efficient way to pass a
      * small buffer of data to shaders are push constants. Upcoming !
      * */
-    void updateUniformBuffer(uint32_t currentImage)
+    void updateUniformBuffer(uint32_t currentImage, glm::mat4 modelMatrix)
     {
-        static auto startTime = std::chrono::high_resolution_clock::now();
-
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(
-                         currentTime - startTime)
-                         .count();
 
         UniformBufferObject ubo{};
-        /**
-         * The glm::rotate function takes an existing transformation, rotation
-         * angle and rotation axis as parameters. The glm::mat4(1.0f)
-         * constructor returns an identity matrix. Using a rotation angle of
-         * time * glm::radians(degrees) accomplishes the purpose of rotation
-         * DEGREES degrees per second.
-         * */
-        ubo.model = glm::rotate(glm::mat4(1.0f),
-                                time * glm::radians(10.0f), /// slow: 10° / s
-                                glm::vec3(.0f, .0f, 1.0f));
+        ubo.model = modelMatrix;
+
         /**
          * view transformation: look at the geometry from above at a 45 degree
          * angle. The glm::lookAt function takes the eye position, center
          * position and up axis as parameters.
          * */
-        ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = glm::lookAt(eyeVec, centerVec, upVec);
 
         /**
          * Perspective projection with a 45 degree vertical field-of-view. The
@@ -376,11 +797,11 @@ class TriangleApp {
          * aspect ratio to take into account the new width and height of the
          * window after a resize.
          * */
-        ubo.proj = glm::perspective(glm::radians(45.0f),
+        ubo.proj = glm::perspective(glm::radians(m_fieldOfView),
                                     swapChainExtent.width
                                         / (float)swapChainExtent.height,
-                                    0.1f,
-                                    10.0f);
+                                    m_zNear,
+                                    m_zFar);
         // GLM was originally designed for OpenGL, where the Y coordinate of the
         // clip coordinates is inverted. The easiest way to compensate for that
         // is to flip the sign on the scaling factor of the Y axis in the
@@ -944,12 +1365,12 @@ class TriangleApp {
             std::cout << "Logical device: " << device << " created."
                       << std::endl;
         }
+        presentQueueFamily = indices.presentFamily.value();
+        graphicsQueueFamily = indices.graphicsFamily.value();
         // as we only create a single queue from this family, we use 0 as a
         // index retrieve the  queue handle
-        vkGetDeviceQueue(
-            device, indices.presentFamily.value(), 0, &presentQueue);
-        vkGetDeviceQueue(
-            device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+        vkGetDeviceQueue(device, presentQueueFamily, 0, &presentQueue);
+        vkGetDeviceQueue(device, graphicsQueueFamily, 0, &graphicsQueue);
     }
 
     void createSwapChain()
@@ -1722,7 +2143,8 @@ class TriangleApp {
     {
         int texWidth, texHeight, texChannels;
         stbi_uc *pixels = stbi_load(
-            textureMap.at(Model::VikingRoom).c_str(),
+            textureMap.at(Model::Earth3Dv3).c_str(),
+            // textureMap.at(Model::VikingRoom).c_str(),
             // stbi_uc *pixels =
             // stbi_load(textureMap.at(Model::TestRectangle).c_str(),
             &texWidth,
@@ -1889,7 +2311,8 @@ class TriangleApp {
                                  &materials,
                                  &warn,
                                  &err,
-                                 modelMap.at(Model::VikingRoom).c_str()))
+                                 // modelMap.at(Model::VikingRoom).c_str()))
+                                 modelMap.at(Model::Earth3Dv3).c_str()))
         {
             throw std::runtime_error(warn + err);
         }
@@ -2198,6 +2621,8 @@ class TriangleApp {
         // when using an indexbuffer this is the method to draw stuff
         vkCmdDrawIndexed(
             commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
         vkCmdEndRenderPass(commandBuffer);
 
@@ -2781,6 +3206,8 @@ class TriangleApp {
     VkQueue graphicsQueue;
     VkSurfaceKHR surface;
     VkQueue presentQueue;
+    uint32_t presentQueueFamily;
+    uint32_t graphicsQueueFamily;
     VkSwapchainKHR swapChain;
     std::vector<VkImage> swapChainImages;
     VkFormat swapChainImageFormat;
@@ -2813,6 +3240,7 @@ class TriangleApp {
     uint32_t currentFrame = 0;
 
     bool framebufferResized = false;
+    bool timedRotation = true;
 
     // vertices and indices for the loaded 3D-model
     std::vector<Vertex> vertices;
