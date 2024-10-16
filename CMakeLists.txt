@@ -6,22 +6,51 @@ if(${CMAKE_VERSION} VERSION_LESS 3.12)
     cmake_policy(VERSION ${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION})
 endif()
 
-project(VulkanTutorial1 VERSION 1.0
+project(SolarEngine VERSION 1.0
   DESCRIPTION "Earth System 3D with real NASA Data"
   LANGUAGES CXX
 )
 
-set(MAIN "main.cpp")
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake/;${CMAKE_MODULE_PATH}")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_COMPILER "g++")
 set(INCLUDE_THIRDPARTY_FOLDER "includeLibs/")
 set(INCLUDE_IMGUI_FOLDER "imgui/")
-find_package(fmt REQUIRED)
 set(IMGUI_DIR imgui)
+set(IMGUI_FILES
+  ${IMGUI_DIR}/imgui_impl_vulkan.cpp
+  ${IMGUI_DIR}/imgui_impl_glfw.cpp
+  ${IMGUI_DIR}/imgui.cpp
+  ${IMGUI_DIR}/imgui_demo.cpp
+  ${IMGUI_DIR}/imgui_draw.cpp
+  ${IMGUI_DIR}/imgui_stdlib.cpp
+  ${IMGUI_DIR}/imgui_tables.cpp
+  ${IMGUI_DIR}/imgui_widgets.cpp
+)
+find_package(fmt REQUIRED)
 include_directories(${IMGUI_DIR})
 
-add_executable(earth3D "main.cpp" ${IMGUI_DIR}/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui_impl_glfw.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_stdlib.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+set(MAIN "src/main.cpp")
+
+set (SRC
+  "src/engine/sol_engine.cpp"
+)
+
+set (HEADER
+  "src/engine/sol_engine.h"
+)
+
+set(ENGINE
+  ${SRC}
+  ${HEADER}
+)
+
+add_executable(earth3D
+  ${MAIN}
+  ${ENGINE}
+  ${IMGUI_FILES}
+)
+
 target_include_directories(earth3D PUBLIC "${INCLUDE_THIRDPARTY_FOLDER}")
 
 # Set compile options
