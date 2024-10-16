@@ -158,7 +158,7 @@ class TriangleApp {
         window = glfwCreateWindow(
             WINDOW_WIDTH,
             WINDOW_HEIGHT,
-            "Vulkan Tutorial",
+            "Earth 3D",
             nullptr,
             nullptr); /// optionally specify a monitor to open the window on,
                       /// last parameter relevant to OpenGL
@@ -194,7 +194,7 @@ class TriangleApp {
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
-        loadModel();
+        loadModels();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -903,7 +903,7 @@ class TriangleApp {
         // 1. set information about application
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "Hello Triangle";
+        appInfo.pApplicationName = "Earth 3D";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -913,12 +913,6 @@ class TriangleApp {
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
-
-        // GLFW has built-in function that returns the extensionscount, for
-        // standard
-        uint32_t glfwExtensionCount = 0;
-        const char **glfwExtension;
-        glfwExtension = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
         auto extensions = getRequiredExtensions();
         createInfo.enabledExtensionCount = static_cast<uint32_t>(
@@ -1233,8 +1227,8 @@ class TriangleApp {
     /**
      *Vulkan separates the concept of physical and logical devices. A physical
      *device usually represents a single complete implementation of Vulkan
-     *(excluding instance-level functionality) available to the host, of which
-     *there are a finite number.
+     *(excluding instance-level functiohttps://openai.com/nality) available to
+     *the host, of which there are a finite number.
      * */
     void pickPhysicalDevice()
     {
@@ -1249,8 +1243,10 @@ class TriangleApp {
 
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+        /**/
         // rate the physical device and pick the one with the highest score
         // (which def. meet the requirement)
+
         std::multimap<int, VkPhysicalDevice> candidates;
 
         for (const auto &device : devices)
@@ -1265,6 +1261,21 @@ class TriangleApp {
         {
             throw std::runtime_error("failed to find a suitable GPU!");
         }
+        /* // TODO: check: when using the follwoing section
+        the app crashes for (const auto &device : devices)
+        {
+            if (isDeviceSuitable(device))
+            {
+                physicalDevice = device;
+                break;
+            }
+        }
+
+        if (physicalDevice == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("failed to find a suitable GPU!");
+        }
+        */
     }
 
     // check GPU for vulkan-features we need for our app, later on we add more !
@@ -1303,6 +1314,7 @@ class TriangleApp {
                && supportedFeatures.samplerAnisotropy;
     }
 
+    // TODO: proceed to check
     void createLogicalDevice()
     {
         // 1. specifying details in structs
@@ -2288,10 +2300,29 @@ class TriangleApp {
             textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    /**
+    void loadModels()
+    {
+        std::vector<Model> models = {Model::Earth3Dv3}; //, Model::Moon};
+
+        for (const auto &model : models)
+        {
+            loadModel(model);
+        }
+    }
+
+    /*validation layer: Validation Error: [
+     * VUID-VkDescriptorSetAllocateInfo-descriptorSetCount-00306 ] Object 0:
+     * handle = 0x2f000000002f, type = VK_OBJECT_TYPE_DESCRIPTOR_POOL; |
+     * MessageID = 0xe0b847af | Unable to allocate 1 descriptorSets from
+     * VkDescriptorPool 0x2f000000002f[]. This pool only has 0 descriptorSets
+     * remaining. The Vulkan spec states: descriptorSetCount must not be greater
+     * than the number of sets that are currently available for allocation in
+     * descriptorPool
+     * (https://www.khronos.org/registry/vulkan/specs/1.0/html/vkspec.html#VUID-VkDescriptorSetAllocateInfo-descriptorSetCount-00306)
+     *
      * Use thirdparty lib to load obj files / 3D models
      * */
-    void loadModel()
+    void loadModel(Model model)
     {
 
         // An OBJ file consists of positions, normals, texture coordinates and
@@ -2312,7 +2343,7 @@ class TriangleApp {
                                  &warn,
                                  &err,
                                  // modelMap.at(Model::VikingRoom).c_str()))
-                                 modelMap.at(Model::Earth3Dv3).c_str()))
+                                 modelMap.at(model).c_str()))
         {
             throw std::runtime_error(warn + err);
         }
@@ -2685,6 +2716,8 @@ class TriangleApp {
                                /// region of memory, if
                                /// !=0 it is required to be devisible by
                                /// memRequirements.alignment
+
+        // TODO: check if to use a BufferView ?
     }
 
     /**
@@ -2882,7 +2915,7 @@ class TriangleApp {
             descriptorWrites[0].dstArrayElement = 0;
             descriptorWrites[0].descriptorType
                 = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].descriptorCount = 1; // TODO: check was 1
             descriptorWrites[0].pBufferInfo
                 = &bufferInfo; /// used for descriptors that refer to buffer
                                /// data
@@ -2893,7 +2926,7 @@ class TriangleApp {
             descriptorWrites[1].dstArrayElement = 0;
             descriptorWrites[1].descriptorType
                 = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].descriptorCount = 1; // TODO: check was 1
             descriptorWrites[1].pImageInfo
                 = &imageInfo; // Optional, used for descriptors that refer to
                               // image data

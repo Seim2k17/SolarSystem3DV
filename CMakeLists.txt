@@ -7,7 +7,7 @@ if(${CMAKE_VERSION} VERSION_LESS 3.12)
 endif()
 
 project(VulkanTutorial1 VERSION 1.0
-  DESCRIPTION "Learning Vulkan with official Khronos Vukan Tutorial"
+  DESCRIPTION "Earth System 3D with real NASA Data"
   LANGUAGES CXX
 )
 
@@ -21,17 +21,17 @@ find_package(fmt REQUIRED)
 set(IMGUI_DIR imgui)
 include_directories(${IMGUI_DIR})
 
-add_executable(vulkanTut "main.cpp" ${IMGUI_DIR}/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui_impl_glfw.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_stdlib.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
-target_include_directories(vulkanTut PUBLIC "${INCLUDE_THIRDPARTY_FOLDER}")
+add_executable(earth3D "main.cpp" ${IMGUI_DIR}/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui_impl_glfw.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_stdlib.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+target_include_directories(earth3D PUBLIC "${INCLUDE_THIRDPARTY_FOLDER}")
 
 # Set compile options
-target_compile_options(vulkanTut PRIVATE
+target_compile_options(earth3D PRIVATE
   -std=c++17
   -O2
 )
 
 # Set link options
-target_link_libraries(vulkanTut PRIVATE
+target_link_libraries(earth3D PRIVATE
   glfw
   vulkan
   dl
@@ -41,7 +41,7 @@ target_link_libraries(vulkanTut PRIVATE
   X11
   Xxf86vm
   Xrandr
-  Xi
+  #Xi
   fmt::fmt
   stdc++
   -lm

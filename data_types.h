@@ -25,6 +25,7 @@ enum class Model {
     TestRectangle = 0,
     Earth3D,
     Earth3Dv3,
+    Moon,
     VikingRoom,
 };
 
@@ -33,13 +34,15 @@ static const std::map<Model, std::string> textureMap = {
     {Model::VikingRoom, "textures/viking_room.png"},
     {Model::Earth3D, "textures/texture_earth2.jpg"},
     {Model::Earth3Dv3, "textures/texture_earth3.jpg"},
+    {Model::Moon, "textures/MoonTexture.jpg"},
 
 };
 
 static const std::map<Model, std::string> modelMap
     = {{Model::VikingRoom, "models/viking_room.obj"},
        {Model::Earth3D, "models/earth2.obj"},
-       {Model::Earth3Dv3, "models/earth3.obj"}
+       {Model::Earth3Dv3, "models/earth3.obj"},
+       {Model::Moon, "models/moon.obj"}
 
 };
 

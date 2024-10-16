@@ -15,6 +15,7 @@ layout(location = 1) out vec2 fragTexCoord;
 
 // specify a descriptor set layout for each descriptor when creating the pipeline layout
 // shaders reference the specific descriptor set like
+// accordng to the UNIFORM_BUFFER descriptor type
 layout (set = 0, binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
