@@ -1,5 +1,6 @@
 #include "sol_engine.h"
 
+#include "VkBootstrap.h"
 #include <GLFW/glfw3.h>
 #include <fmt/core.h>
 
@@ -7,6 +8,8 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+
+constexpr bool bUseValidationLayers = false;
 
 // TODO: howto create uniqueptr from it
 // std::unique_ptr<SolEngine> loadedEngine = nullptr;
@@ -21,11 +24,17 @@ framebufferResizeCallback(GLFWwindow *window, int width, int height)
     app->framebufferResized = true;
 }
 
-static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+/*
+** Key callback function from GLFW, when pressing acertain key this callback is
+*executed
+**
+*/
+static void
+key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         fmt::print("ESC pressed\n");
-        glfwSetWindowShouldClose(window, GLFW_TRUE);
+    glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
 SolEngine &
@@ -42,8 +51,37 @@ SolEngine::init()
 
     initWindow();
 
+    init_vulkan();
+    init_swapchain();
+    init_commands();
+    init_sync_structures();
+
     // everything went fine
     _isInitialized = true;
+}
+
+void
+SolEngine::init_vulkan()
+{
+    // t.b.a
+}
+
+void
+SolEngine::init_swapchain()
+{
+    // t.b.a
+}
+
+void
+SolEngine::init_commands()
+{
+    // t.b.a
+}
+
+void
+SolEngine::init_sync_structures()
+{
+    // t.b.a
 }
 
 void
