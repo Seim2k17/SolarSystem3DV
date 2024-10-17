@@ -11,11 +11,11 @@ class SolEngine {
     SolEngine(){};
 
     static SolEngine &Get();
-    void init();
-    void initWindow();
     void cleanup();
     // draw loop
     void draw();
+    void init();
+    void initWindow();
     // run main loop
     void run();
 
@@ -35,8 +35,9 @@ class SolEngine {
     struct GLFWwindow *window{nullptr};
 
   private:
-    void init_vulkan();
-    void init_swapchain();
     void init_commands();
+    void init_swapchain();
     void init_sync_structures();
+    void init_vulkan();
+    void setupWindowSurface();
 };

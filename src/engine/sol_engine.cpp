@@ -8,8 +8,9 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+#include <vulkan/vulkan_core.h>
 
-constexpr bool bUseValidationLayers = false;
+constexpr bool bUseValidationLayers = true;
 
 // TODO: howto create uniqueptr from it
 // std::unique_ptr<SolEngine> loadedEngine = nullptr;
@@ -37,6 +38,26 @@ key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
     glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
+void
+SolEngine::cleanup()
+{
+
+    if (_isInitialized)
+    {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+    }
+
+    // clear engine pointer
+    loadedEngine = nullptr;
+}
+
+void
+SolEngine::draw()
+{
+    // t.b.a
+}
+
 SolEngine &
 SolEngine::Get()
 {
@@ -59,9 +80,8 @@ SolEngine::init()
     // everything went fine
     _isInitialized = true;
 }
-
 void
-SolEngine::init_vulkan()
+SolEngine::init_commands()
 {
     // t.b.a
 }
@@ -73,15 +93,53 @@ SolEngine::init_swapchain()
 }
 
 void
-SolEngine::init_commands()
+SolEngine::init_sync_structures()
 {
     // t.b.a
 }
 
 void
-SolEngine::init_sync_structures()
+SolEngine::init_vulkan()
 {
-    // t.b.a
+    vkb::InstanceBuilder builder;
+
+    auto solInstance = builder.set_app_name("SolarSystem 3D")
+        .request_validation_layers(bUseValidationLayers)
+        .use_default_debug_messenger()
+        .require_api_version(1, 3, 0) // need at least vulkan 1.3
+        .build();
+
+    vkb::Instance vkb_inst = solInstance.value();
+
+    _instance = vkb_inst.instance;
+    _debug_messenger = vkb_inst.debug_messenger;
+
+    setupWindowSurface();
+
+    VkPhysicalDeviceVulkan13Features features13{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    features13.dynamicRendering = true;
+    features13.synchronization2 = true;
+
+    VkPhysicalDeviceVulkan12Features features12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    features12.bufferDeviceAddress = true;
+    features12.descriptorIndexing = true;
+
+    vkb::PhysicalDeviceSelector selector{vkb_inst};
+    vkb::PhysicalDevice physicalDevice = selector
+        .set_minimum_version(1, 3)
+        .set_required_features_12(features12)
+        .set_required_features_13(features13)
+        .set_surface(_surface)
+        .select()
+        .value();
+
+    vkb::DeviceBuilder deviceBuilder{physicalDevice};
+
+    vkb::Device vkbDevice = deviceBuilder.build().value();
+
+    _device = vkbDevice.device;
+    _chosenGPU = physicalDevice.physical_device;
+
 }
 
 void
@@ -101,26 +159,6 @@ SolEngine::initWindow()
     glfwSetWindowUserPointer(window, this); /// store an arbitrary
     glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     glfwSetKeyCallback(window, key_callback);
-}
-
-void
-SolEngine::cleanup()
-{
-
-    if (_isInitialized)
-    {
-        glfwDestroyWindow(window);
-        glfwTerminate();
-    }
-
-    // clear engine pointer
-    loadedEngine = nullptr;
-}
-
-void
-SolEngine::draw()
-{
-    // t.b.a
 }
 
 void
@@ -145,4 +183,33 @@ SolEngine::run()
 
         draw(); // bla
     }
+}
+
+void
+SolEngine::setupWindowSurface()
+{
+    //TODO: check windows code
+
+#ifdef WIN32
+        // Windows specific code:
+        VkWin32SurfaceCreateInfoKHR createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+        createInfo.hwnd = glfwGetWin32Window(window);
+        createInfo.hinstance = GetModuleHandle(nullptr);
+
+        if (vkCreateWin32SurfaceKHR(instance, &createInfo, nullptr, &_surface)
+            != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create window surface!");
+        }
+#endif
+
+#ifdef __linux__
+        if (glfwCreateWindowSurface(_instance, window, nullptr, &_surface)
+            != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create window!");
+        }
+#endif
+
 }
