@@ -59,10 +59,13 @@ target_compile_options(earth3D PRIVATE
   -O2
 )
 
+add_subdirectory(third_party)
+
 # Set link options
 target_link_libraries(earth3D PRIVATE
   glfw
   vulkan
+  vkbootstrap
   dl
   #mvec
   #m

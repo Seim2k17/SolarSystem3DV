@@ -1,6 +1,7 @@
 #include "sol_engine.h"
 
 #include <GLFW/glfw3.h>
+#include <fmt/core.h>
 
 #include <cassert>
 #include <chrono>
@@ -18,6 +19,13 @@ framebufferResizeCallback(GLFWwindow *window, int width, int height)
 {
     auto app = reinterpret_cast<SolEngine *>(glfwGetWindowUserPointer(window));
     app->framebufferResized = true;
+}
+
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+        fmt::print("ESC pressed\n");
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
 SolEngine &
@@ -54,6 +62,7 @@ SolEngine::initWindow()
                   /// last parameter relevant to OpenGL
     glfwSetWindowUserPointer(window, this); /// store an arbitrary
     glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+    glfwSetKeyCallback(window, key_callback);
 }
 
 void
