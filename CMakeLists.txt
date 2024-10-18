@@ -38,6 +38,7 @@ set (SRC
 
 set (HEADER
   "src/engine/sol_engine.h"
+  "src/engine/sol_types.h"
 )
 
 set(ENGINE

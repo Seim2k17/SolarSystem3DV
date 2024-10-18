@@ -1,6 +1,7 @@
 #include "sol_engine.h"
 
 #include "VkBootstrap.h"
+#include "sol_types.h"
 #include <GLFW/glfw3.h>
 #include <fmt/core.h>
 
@@ -71,6 +72,14 @@ SolEngine::cleanup()
     if (_isInitialized)
     {
         // cleaning up order is the opposite of creation process
+        // make sure the gpu has stopped working
+        vkDeviceWaitIdle(_device);
+
+        for(int i = 0; i < FRAME_OVERLAP; i++)
+        {
+            vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
+        }
+
         destroy_swapchain();
 
         vkDestroySurfaceKHR(_instance, _surface, nullptr);
@@ -130,7 +139,43 @@ SolEngine::init()
 void
 SolEngine::init_commands()
 {
-    // t.b.a
+    // general workflow of commands:
+    // 1. allocate VkCommandBuffer from a VkCommandPool
+    // 2. record commands into the command buffer, using VkCmdXXXX functions
+    // 3. submit the command buffer into a VkQueue which starts executing the commands
+
+    // 1a create a command pool for commands submitted to the graphics queue
+
+    VkCommandPoolCreateInfo commandPoolInfo = {};
+    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    commandPoolInfo.pNext = nullptr;
+    commandPoolInfo.flags
+        = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // we also want to
+                                                           // reset individual
+                                                           // commands,
+                                                           // alternative is to
+                                                           // reset the pool
+                                                           // which resets ALL
+                                                           // commands
+    commandPoolInfo.queueFamilyIndex = _graphicsQueueFamily;
+
+    for(int i = 0; i < FRAME_OVERLAP; i++) {
+      VK_CHECK(vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &_frames[i]._commandPool));
+
+      // 1b allocate the default command buffer that we will use for rendering
+      VkCommandBufferAllocateInfo cmdAllocInfo = {};
+      cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      cmdAllocInfo.pNext = nullptr;
+      cmdAllocInfo.commandPool = _frames[i]._commandPool;
+      cmdAllocInfo.commandBufferCount = 1; // allows to alloc multiple buffers at once
+      cmdAllocInfo.level
+          = VK_COMMAND_BUFFER_LEVEL_PRIMARY; // primaries are sent to the
+                                             // VkQueue, secondaries are most
+                                             // commonly used as subcommands
+                                             // from multiple threads
+
+      VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i]._mainCommandBuffer));
+    }
 }
 
 void
@@ -188,6 +233,10 @@ SolEngine::init_vulkan()
     _device = vkbDevice.device;
     _chosenGPU = physicalDevice.physical_device;
 
+    // due vkbootstrap get directly the graphics queue
+    _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
+    _graphicsQueueFamily
+        = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 }
 
 void
