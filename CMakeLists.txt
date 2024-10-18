@@ -34,11 +34,14 @@ set(MAIN "src/main.cpp")
 
 set (SRC
   "src/engine/sol_engine.cpp"
+  "src/engine/sol_images.cpp"
+
 )
 
 set (HEADER
   "src/engine/sol_engine.h"
   "src/engine/sol_types.h"
+  "src/engine/sol_images.h"
 )
 
 set(ENGINE

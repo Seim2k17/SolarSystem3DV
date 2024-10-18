@@ -111,7 +111,34 @@ SolEngine::destroy_swapchain()
 void
 SolEngine::draw()
 {
-    // t.b.a
+    // wait until the gpu has finished rendering the last frame. Timeout of 1 second
+    // when setting timeout to 0ns we could check if the GPU is still busy with commandexecution
+    VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
+    VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence)); // Fences need to be reset btw. uses, can't use same fence on multiple GPU commands without resetting
+
+   // request image from the swapchain
+   uint32_t swapchainImageIndex;
+   VK_CHECK(vkAcquireNextImageKHR(_device
+                                  , _swapchain, 1000000000
+                                  , get_current_frame()._swapchainSemaphore
+                                  , nullptr
+                                  , &swapchainImageIndex));
+   VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
+
+   // now that we are sure that the commands finished executing, we can safely
+   // reset the command buffer to begin recording again.
+   VK_CHECK(vkResetCommandBuffer(cmd, 0));
+
+   VkCommandBufferBeginInfo commandBufferInfo = {};
+   commandBufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+   commandBufferInfo.pNext = nullptr;
+   commandBufferInfo.pInheritanceInfo = nullptr;
+   commandBufferInfo.flags
+       = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // we use this buffer only
+                                                      // once
+
+   // start recording:
+   VK_CHECK(vkBeginCommandBuffer(cmd, &commandBufferInfo));
 }
 
 SolEngine &
@@ -188,7 +215,22 @@ SolEngine::init_swapchain()
 void
 SolEngine::init_sync_structures()
 {
-    // t.b.a
+    VkFenceCreateInfo fenceInfo = {};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.pNext = nullptr;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    VkSemaphoreCreateInfo semaphoreInfo = {};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphoreInfo.pNext = nullptr;
+    semaphoreInfo.flags = 0;
+
+    for (int i = 0; i < FRAME_OVERLAP; i++) {
+        VK_CHECK(vkCreateFence(_device, &fenceInfo, nullptr, &_frames[i]._renderFence));
+
+        VK_CHECK(vkCreateSemaphore(_device, &semaphoreInfo, nullptr, &_frames[i]._swapchainSemaphore));
+        VK_CHECK(vkCreateSemaphore(_device, &semaphoreInfo, nullptr, &_frames[i]._renderSemaphore));
+    }
 }
 
 void

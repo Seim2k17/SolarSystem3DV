@@ -10,6 +10,8 @@ const uint32_t WINDOW_HEIGHT = 1024;
 struct FrameData {
     VkCommandPool _commandPool;
     VkCommandBuffer _mainCommandBuffer;
+    VkSemaphore _swapchainSemaphore, _renderSemaphore; // swapcS: so render commands wait on the swapchain-image request, renderS: to control presenting the img to the OS once drawing finishes
+    VkFence _renderFence; // wait fro draw commands of a given frame
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
