@@ -1,12 +1,16 @@
 #include "sol_engine.h"
 
 #include "VkBootstrap.h"
+#include "sol_initializers.h"
 #include "sol_types.h"
+#include "sol_images.h"
+
 #include <GLFW/glfw3.h>
 #include <fmt/core.h>
 
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <thread>
 #include <vulkan/vulkan_core.h>
@@ -78,6 +82,11 @@ SolEngine::cleanup()
         for(int i = 0; i < FRAME_OVERLAP; i++)
         {
             vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
+
+            // destroy sync objects
+            vkDestroyFence(_device, _frames[i]._renderFence, nullptr);
+            vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
+            vkDestroySemaphore(_device, _frames[i]._swapchainSemaphore, nullptr);
         }
 
         destroy_swapchain();
@@ -139,6 +148,64 @@ SolEngine::draw()
 
    // start recording:
    VK_CHECK(vkBeginCommandBuffer(cmd, &commandBufferInfo));
+
+   SolUtil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+   // make a clear-color from a frame
+   // flash with a 120 fram period
+   VkClearColorValue clearValue;
+   float flash = std::abs(std::sin(_frameNumber / 120.0f));
+   clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+
+   VkImageSubresourceRange clearRange = SolInit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+
+  // clear image
+   vkCmdClearColorImage(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL,
+                        &clearValue, 1, &clearRange);
+
+   // make the swapchain image into presentable mode
+   SolUtil::transition_image(cmd, _swapchainImages[swapchainImageIndex],
+                             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+   // finalize rec & command buffer (we can no longer add commands), can now be executed
+   VK_CHECK(vkEndCommandBuffer(cmd));
+
+   // prepare the submission to the queue
+   // we want to wait on the _presentSemaphore, as that semephore is signaled when the swapchain is ready
+   // we will signal the _renderSemaphore, to signal that rendering is finished
+   VkCommandBufferSubmitInfo cmdinfo = SolInit::command_buffer_submit_info(cmd);
+
+   VkSemaphoreSubmitInfo waitInfo = SolInit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+                                                                   get_current_frame()._swapchainSemaphore);
+   VkSemaphoreSubmitInfo signalInfo = SolInit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+                                                                     get_current_frame()._renderSemaphore);
+
+   VkSubmitInfo2 submit = SolInit::submit_info(&cmdinfo, &signalInfo, &waitInfo);
+
+   // submit command buffer to the queue and execute it
+   // _renderfence will now block until the graphic commands finish execution
+   VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit
+                           , get_current_frame()._renderFence));
+
+   // prepare present
+   // this will put the image we just renered to into the visible window
+   // we want to wait on the _renderSemaphore for that,
+   // as its necessary that drawing commands have finished before the image is displayed
+   VkPresentInfoKHR presentInfo = {};
+   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+   presentInfo.pNext = nullptr;
+   presentInfo.pSwapchains = &_swapchain;
+   presentInfo.swapchainCount = 1;
+
+   presentInfo.pWaitSemaphores = &get_current_frame()._renderSemaphore;
+   presentInfo.waitSemaphoreCount = 1;
+
+   presentInfo.pImageIndices = &swapchainImageIndex;
+
+   VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+
+   // increase the number of frames drawn
+   _frameNumber++;
 }
 
 SolEngine &
