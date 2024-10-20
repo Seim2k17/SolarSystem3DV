@@ -72,6 +72,7 @@ target_link_libraries(earth3D PRIVATE
   glfw
   vulkan
   vkbootstrap
+  vma
   dl
   #mvec
   #m

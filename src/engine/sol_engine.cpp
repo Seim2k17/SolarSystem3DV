@@ -5,6 +5,9 @@
 #include "sol_types.h"
 #include "sol_images.h"
 
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+
 #include <GLFW/glfw3.h>
 #include <fmt/core.h>
 
@@ -62,7 +65,7 @@ SolEngine::create_swapchain(uint32_t width, uint32_t height)
         .build()
         .value();
 
-    _swapchainExtend = vkbSwapchain.extent;
+    _swapchainExtent = vkbSwapchain.extent;
     // store swapchain and its related images
 	_swapchain = vkbSwapchain.swapchain;
 	_swapchainImages = vkbSwapchain.get_images().value();
@@ -87,7 +90,12 @@ SolEngine::cleanup()
             vkDestroyFence(_device, _frames[i]._renderFence, nullptr);
             vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
             vkDestroySemaphore(_device, _frames[i]._swapchainSemaphore, nullptr);
+
+            _frames[i]._deletionQueue.flush();
         }
+
+        // flush the global deletion queue
+        _mainDeletionQueue.flush();
 
         destroy_swapchain();
 
@@ -123,6 +131,9 @@ SolEngine::draw()
     // wait until the gpu has finished rendering the last frame. Timeout of 1 second
     // when setting timeout to 0ns we could check if the GPU is still busy with commandexecution
     VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
+
+    get_current_frame()._deletionQueue.flush();
+
     VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence)); // Fences need to be reset btw. uses, can't use same fence on multiple GPU commands without resetting
 
    // request image from the swapchain
@@ -146,26 +157,26 @@ SolEngine::draw()
        = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // we use this buffer only
                                                       // once
 
+   _drawExtent.width = _drawImage.imageExtent.width;
+   _drawExtent.height = _drawImage.imageExtent.height;
+
    // start recording:
    VK_CHECK(vkBeginCommandBuffer(cmd, &commandBufferInfo));
 
-   SolUtil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+   SolUtil::transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-   // make a clear-color from a frame
-   // flash with a 120 fram period
-   VkClearColorValue clearValue;
-   float flash = std::abs(std::sin(_frameNumber / 120.0f));
-   clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+   draw_background(cmd);
 
-   VkImageSubresourceRange clearRange = SolInit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
-
-  // clear image
-   vkCmdClearColorImage(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL,
-                        &clearValue, 1, &clearRange);
-
-   // make the swapchain image into presentable mode
-   SolUtil::transition_image(cmd, _swapchainImages[swapchainImageIndex],
+  // transition the draw image and the swapchain image into their correct transfer layouts
+   SolUtil::transition_image(cmd, _drawImage.image,
                              VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+   SolUtil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    // execute a copy from the draw image into the swapchain
+   SolUtil::copy_image_to_image(cmd, _drawImage.image, _swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
+
+    // set swapchain image layout to Present so we can show it on the screen
+   SolUtil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
    // finalize rec & command buffer (we can no longer add commands), can now be executed
    VK_CHECK(vkEndCommandBuffer(cmd));
@@ -206,6 +217,24 @@ SolEngine::draw()
 
    // increase the number of frames drawn
    _frameNumber++;
+}
+
+void
+SolEngine::draw_background(VkCommandBuffer cmd)
+{
+
+   // make a clear-color from a frame
+   // flash with a 120 frame period
+   VkClearColorValue clearValue;
+   float flash = std::abs(std::sin(_frameNumber / 120.0f));
+   clearValue = {{.0f, .0f, flash, 1.0f}};
+
+   VkImageSubresourceRange clearRange = SolInit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+
+  // clear image
+   vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL,
+                        &clearValue, 1, &clearRange);
+
 }
 
 SolEngine &
@@ -276,7 +305,47 @@ void
 SolEngine::init_swapchain()
 {
     // size of the swapchainimages need to have the size of the surface window
-    create_swapchain(_windowExtend.width, _windowExtend.height);
+    create_swapchain(_windowExtent.width, _windowExtent.height);
+
+    VkExtent3D drawImageExtent = {
+      _windowExtent.width,
+      _windowExtent.height,
+      1
+    };
+
+    // hardcode the draw format to 32 bit float
+    _drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    _drawImage.imageExtent = drawImageExtent;
+    // all imgs & buffers must fill a usageflags with what they will be used for
+    VkImageUsageFlags drawImageUsages{};
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // copy from
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT; // copy into a image
+    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT; // compute shader ca write to it
+    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // so we can use graphics pipelines to draw geometry into it
+
+    VkImageCreateInfo rimg_info = SolInit::image_create_info(_drawImage.imageFormat, drawImageUsages, drawImageExtent);
+
+    // we want to allocate the img-memory from the GPU
+    VmaAllocationCreateInfo rimg_allocinfo = {};
+    rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY; // GPU texture, never be accessed from CPU
+    rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); // only GPU VRAM, fastest access
+
+    // allocate and create the image
+    vmaCreateImage(_allocator, &rimg_info, &rimg_allocinfo, &_drawImage.image, &_drawImage.allocation, nullptr);
+
+
+    // build a image-view for the draw image to use for rendering
+    VkImageViewCreateInfo rview_info = SolInit::imageview_create_info(_drawImage.imageFormat, _drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+
+
+    VK_CHECK(vkCreateImageView(_device, &rview_info, nullptr, &_drawImage.imageView));
+
+    // add to deletion queues
+    _mainDeletionQueue.push_function([&]() {
+        vkDestroyImageView(_device, _drawImage.imageView, nullptr);
+        vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
+    });
+
 }
 
 void
@@ -346,6 +415,15 @@ SolEngine::init_vulkan()
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
     _graphicsQueueFamily
         = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+    VmaAllocatorCreateInfo allocatorInfo = {};
+    allocatorInfo.physicalDevice = _chosenGPU;
+    allocatorInfo.device = _device;
+    allocatorInfo.instance = _instance;
+    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    vmaCreateAllocator(&allocatorInfo, &_allocator);
+
+    _mainDeletionQueue.push_function([&]() {vmaDestroyAllocator(_allocator);});
 }
 
 void
