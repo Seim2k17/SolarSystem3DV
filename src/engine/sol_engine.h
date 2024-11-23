@@ -1,5 +1,7 @@
 #pragma once
 #include "sol_types.h"
+#include "sol_descriptors.h"
+
 #include "vk_mem_alloc.h"
 
 #include <vulkan/vulkan_core.h>
@@ -19,6 +21,10 @@ struct FrameData {
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
+
+constexpr uint32_t MAX_DESCRIPTOR_SETS = 10;
+constexpr float DESCRIPTOR_PER_SET_RATIO = 1.0f;
+
 
 class SolEngine {
   public:
@@ -71,6 +77,14 @@ class SolEngine {
 
     VmaAllocator _allocator;
 
+    DescriptorAllocator globalDescriptorAllocator;
+
+	VkDescriptorSet _drawImageDescriptors;
+	VkDescriptorSetLayout _drawImageDescriptorLayout;
+
+    VkPipeline _gradientPipeline;
+    VkPipelineLayout _gradientPipelineLayout;
+
   private:
     void create_swapchain(uint32_t width, uint32_t height);
     void destroy_swapchain();
@@ -78,5 +92,9 @@ class SolEngine {
     void init_swapchain();
     void init_sync_structures();
     void init_vulkan();
+    void init_descriptors();
+    void init_pipelines();
+    void init_background_pipelines();
+
     void setupWindowSurface();
 };
